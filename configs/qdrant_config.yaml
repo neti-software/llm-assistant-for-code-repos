@@ -1,10 +1,8 @@
 connection:
   host_url: "http://127.0.0.1:6333"          # Qdrant server URL
   collection_name: "docs_demo"               # Target collection in Qdrant
-  embedding_model: "jinaai/jina-embeddings-v2-base-code"  # Model used for vector embeddings
-  batch_size: 64                             # How many items to embed/index in one request
+  batch_size_text: 64                             # How many items to embed/index in one request
   request_timeout_sec: 30                    # Timeout for API calls in seconds
 
 collection_settings:
   distance_metric: "cosine"                  # Vector similarity metric: cosine, dot, euclid
-  vector_size: "auto"                        # Dimensionality of vectors; 'auto' to infer

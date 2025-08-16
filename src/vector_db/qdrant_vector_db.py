@@ -11,7 +11,8 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from fastembed import TextEmbedding
+
+from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 
 
 class QdrantVectorDB:
@@ -38,7 +39,7 @@ class QdrantVectorDB:
       cfg["collection_settings"]["vector_size"]      -> int or "auto"
     """
 
-    def __init__(self, cfg: Dict):
+    def __init__(self, cfg: Dict, embedding_model: EmbeddingBuilder):
         connection_cfg = cfg["connection"]
         collection_cfg = cfg["collection_settings"]
 
@@ -49,18 +50,10 @@ class QdrantVectorDB:
         self.collection_name = connection_cfg["collection_name"]
 
         # Embedding model
-        self.embedding_model = TextEmbedding(model_name=connection_cfg["embedding_model"])
+        self.embedding_model = embedding_model
 
         # Distance metric
         self.distance_metric = self._DISTANCE_MAP[collection_cfg["distance_metric"]]
-
-        # Vector dimension (explicit int or inferred via probe)
-        vector_size_cfg = collection_cfg["vector_size"]
-        if isinstance(vector_size_cfg, str) and vector_size_cfg.lower() == "auto":
-            probe_vector = next(self.embedding_model.embed(["dimension probe"]))
-            self.vector_dim = int(probe_vector.shape[0])
-        else:
-            self.vector_dim = int(vector_size_cfg)
 
     # ------------- public API -------------
     def create_collection_with_data(
@@ -87,7 +80,7 @@ class QdrantVectorDB:
         metadata = list(metadata)
 
         # Embed everything in one go
-        vectors = list(self.embedding_model.embed(code_texts_to_embedded))
+        vectors = list(self.embedding_model.code_embed(code_texts_to_embedded))
 
         # Build Qdrant points
         points = [
@@ -124,7 +117,7 @@ class QdrantVectorDB:
             filter_conditions: Optional[Dict[str, Union[str, int, float, bool]]] = None,
             include_payload: bool = True,
     ):
-        query_vector = next(self.embedding_model.embed([query_text]))
+        query_vector = self.embedding_model.code_embed(query_text)
         query_filter = (
             self._build_eq_filter(filter_conditions) if filter_conditions else None
         )
@@ -140,7 +133,7 @@ class QdrantVectorDB:
     def _create_collection(self) -> None:
         self.qdrant_client.create_collection(
             collection_name=self.collection_name,
-            vectors_config=VectorParams(size=self.vector_dim, distance=self.distance_metric),
+            vectors_config=VectorParams(size=self.embedding_model.get_dim_size_code(), distance=self.distance_metric),
         )
 
     @staticmethod
