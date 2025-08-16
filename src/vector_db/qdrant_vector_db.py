@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Optional, Sequence, Union
+from typing import Dict, Optional, Sequence, Union, Any
 import uuid
 
 from qdrant_client import QdrantClient
@@ -57,40 +57,87 @@ class QdrantVectorDB:
 
     # ------------- public API -------------
     def create_collection_with_data(
-            self,
-            documents: Sequence[Dict[str, Union[str, int, float, bool, list, dict]]],
-            overwrite_existing: bool = False,
-            create_payload_indexes: bool = True,
+        self,
+        documents: Sequence[Dict[str, Any]],
+        overwrite_existing: bool = False,
+        create_payload_indexes: bool = True,
     ) -> None:
-        # Validate required key
-        for idx, doc in enumerate(documents):
-            if "code_text_to_embedded" not in doc:
-                raise KeyError(f"documents[{idx}] missing required 'code_text_to_embedded' key")
+        # ---------------- Validate ----------------
+        if not documents:
+            raise ValueError("No documents provided")
 
-        # Ensure collection exists (and optionally overwrite)
+        # Find all embedding fields dynamically
+        embedding_keys = {
+            key
+            for doc in documents
+            for key in doc.keys()
+            if key.endswith("_to_embedded")
+        }
+        if not embedding_keys:
+            raise KeyError("No '*_to_embedded' fields found in documents")
+
+        # ---------------- Create collection ----------------
         if overwrite_existing and self.qdrant_client.collection_exists(self.collection_name):
             self.qdrant_client.delete_collection(self.collection_name)
-        self._create_collection()
 
-        # Prepare data
-        pairs = ((str(doc["code_text_to_embedded"]), doc["metadata"]) for doc in documents)
-        code_texts_to_embedded, metadata = zip(*pairs)
+        if not self.qdrant_client.collection_exists(self.collection_name):
+            self.qdrant_client.recreate_collection(
+                collection_name=self.collection_name,
+                vectors_config={
+                    key: VectorParams(
+                        size=(self.embedding_model.get_dim_size_code() if key.startswith("code")
+                              else self.embedding_model.get_dim_size_text()),
+                        distance=Distance.COSINE,
+                    )
+                    for key in embedding_keys
+                },
+            )
 
-        code_texts_to_embedded = list(code_texts_to_embedded)
-        metadata = list(metadata)
+        vectors_config = {}
+        for key in embedding_keys:
+            # decide which embedding model to use
+            if key.startswith("code"):
+                dim = self.embedding_model.get_dim_size_code()
+                vectors_config[key] = VectorParams(size=dim, distance=Distance.COSINE)
+            else:
+                dim = self.embedding_model.get_dim_size_text()
+                vectors_config[key] = VectorParams(size=dim, distance=Distance.COSINE)
 
-        # Embed everything in one go
-        vectors = list(self.embedding_model.code_embed(code_texts_to_embedded))
+        # ---------------- Prepare data ----------------
+        points = []
+        for doc in documents:
+            payload = doc.get("metadata", {})
+            vectors = {}
 
-        # Build Qdrant points
-        points = [
-            PointStruct(id=str(uuid.uuid4()), vector=vec, payload=payload)
-            for vec, payload in zip(vectors, metadata)
-        ]
+            for key in embedding_keys:
+                value = doc.get(key)
 
-        # Insert into Qdrant
-        self.qdrant_client.upsert(self.collection_name, points=points)
+                if value is None or str(value).strip() == "":
+                    # dummy vector if missing
+                    dim = vectors_config[key].size
+                    vectors[key] = [0.0] * dim
+                else:
+                    if key.startswith("code"):
+                        vectors[key] = self.embedding_model.code_embed(str(value))
+                    else:
+                        vectors[key] = self.embedding_model.text_embed(str(value))
 
+            points.append(
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=vectors,  # ✅ always dict (multi-vector mode)
+                    payload=payload,
+                )
+            )
+
+        # ---------------- Upsert ----------------
+        if points:
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+            )
+
+        # ---------------- Payload indexes ----------------
         if create_payload_indexes:
             fields_to_index = {
                 "repo": "keyword",
@@ -102,12 +149,13 @@ class QdrantVectorDB:
                 "tag": "keyword",
                 "imports": "keyword",
                 "calls": "keyword",
-                "symbol_name": "keyword"
+                "symbol_name": "keyword",
             }
-
             for field_name, schema in fields_to_index.items():
                 self.qdrant_client.create_payload_index(
-                    self.collection_name, field_name=field_name, field_schema=schema
+                    self.collection_name,
+                    field_name=field_name,
+                    field_schema=schema,
                 )
 
     def search_collection(
@@ -116,18 +164,44 @@ class QdrantVectorDB:
             top_k: int = 5,
             filter_conditions: Optional[Dict[str, Union[str, int, float, bool]]] = None,
             include_payload: bool = True,
+            per_field: bool = False,  # ✅ new flag
     ):
-        query_vector = self.embedding_model.code_embed(query_text)
+        query_code_vector = self.embedding_model.code_embed(query_text)
+        query_doc_vector = self.embedding_model.text_embed(query_text)
+
         query_filter = (
             self._build_eq_filter(filter_conditions) if filter_conditions else None
         )
-        return self.qdrant_client.search(
-            collection_name=self.collection_name,
-            query_vector=query_vector,
-            limit=top_k,
-            with_payload=include_payload,
-            query_filter=query_filter,
-        )
+
+        if per_field:
+            # ✅ return top-k per field
+            code_results = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=("code_to_embedded", query_code_vector),
+                limit=top_k,
+                with_payload=include_payload,
+                query_filter=query_filter,
+            )
+            doc_results = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=("doc_to_embedded", query_doc_vector),
+                limit=top_k,
+                with_payload=include_payload,
+                query_filter=query_filter,
+            )
+            return {"code": code_results, "doc": doc_results}
+
+        else:
+            # ❌ Qdrant does not support multi-vector search directly.
+            # So here we just pick one field as "primary".
+            # Later we could implement weighted fusion.
+            return self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=("code_to_embedded", query_code_vector),
+                limit=top_k,
+                with_payload=include_payload,
+                query_filter=query_filter,
+            )
 
     # ------------- internals -------------
     def _create_collection(self) -> None:
