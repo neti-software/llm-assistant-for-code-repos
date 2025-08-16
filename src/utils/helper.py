@@ -45,10 +45,10 @@ class SingletonABCMeta(ABCMeta):
     def __call__(cls, *args, **kwargs):
         if cls in cls._instances:
             stack = "".join(traceback.format_stack(limit=5))
-            logger.warning(
-                f"[SingletonABC] Attempt to re-instantiate {cls.__name__}. "
-                f"Returning existing instance instead.\nCall trace:\n{stack}"
-            )
+            # logger.warning(
+            #     f"[SingletonABC] Attempt to re-instantiate {cls.__name__}. "
+            #     f"Returning existing instance instead.\nCall trace:\n{stack}"
+            # ) TODO
             return cls._instances[cls]
         instance = super().__call__(*args, **kwargs)
         cls._instances[cls] = instance

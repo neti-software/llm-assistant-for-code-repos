@@ -1,12 +1,14 @@
 from fastembed import TextEmbedding
 from typing import List, Dict, Any, Union
 from src.embedding_module.embedding_abc import EmbeddingABC
+from src.utils.profiler import execution_profiler
 
 
 
 class LocalEmbedding(EmbeddingABC):
     """Local embedding class using fastembed.TextEmbedding with strict model_name and safe defaults."""
 
+    @execution_profiler
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize the embedding model from a config dict.
@@ -41,6 +43,7 @@ class LocalEmbedding(EmbeddingABC):
         self.model = TextEmbedding(**kwargs)
         self.dim_size = self.model.embedding_size
 
+    @execution_profiler
     def embed(self, texts: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
         """Generate embeddings for a single string or a list of strings."""
         if isinstance(texts, str):

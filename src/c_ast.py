@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from tree_sitter_languages import get_parser
-
+from src.utils.profiler import execution_profiler
 
 
 class RepoMetadataManager:
@@ -9,6 +9,7 @@ class RepoMetadataManager:
         self.repo_path = Path(repo_path).resolve()
         self.extractor = TreeSitterMetadataExtractor()
 
+    @execution_profiler
     def process_repo(self) -> Dict[str, dict]:
         results: Dict[str, dict] = {}
         for file_path in self.repo_path.rglob("*"):
@@ -25,12 +26,12 @@ class RepoMetadataManager:
         namespaces = {
             rel: self._python_module_name(rel)
             for rel, meta in results.items()
-            if meta.get("language") == "python"
+            if meta.get("language") == "python" # TODO
         }
 
         # Fill namespaces
         for rel, meta in results.items():
-            if meta.get("language") == "python":
+            if meta.get("language") == "python":  # TODO
                 meta["namespace"] = namespaces.get(rel, "")
 
         # Reverse imports: file → list of files that import it
@@ -48,7 +49,7 @@ class RepoMetadataManager:
         return results
 
     # ---------------- Repo-wide helpers (Python) ----------------
-
+    @execution_profiler
     def _python_module_name(self, rel_path_str: str) -> str:
         """
         Compute module path like `pkg.subpkg.module` using the chain of
@@ -65,18 +66,19 @@ class RepoMetadataManager:
         current = self.repo_path
         for d in dirs:
             current = current / d
-            if (current / "__init__.py").exists():
+            if (current / "__init__.py").exists(): # TODO
                 pkg_parts.append(d)
             else:
                 # non-package dir: reset chain (pkg roots must be contiguous)
                 pkg_parts = []
 
-        if stem == "__init__":
+        if stem == "__init__": # TODO
             # For __init__.py, the module is the package itself
             return ".".join(pkg_parts)
         else:
             return ".".join(pkg_parts + [stem]) if pkg_parts else stem
 
+    @execution_profiler
     def _parse_dunder_all(self, file_path: Path) -> List[str]:
         """
         Parse __all__ = ["a", "b", ...] from a file using tree-sitter.
@@ -86,7 +88,7 @@ class RepoMetadataManager:
             src = file_path.read_bytes()
         except Exception:
             return []
-        parser = get_parser("python")
+        parser = get_parser("python")  # TODO
         tree = parser.parse(src)
         root = tree.root_node
 
@@ -128,6 +130,7 @@ class RepoMetadataManager:
                 if not cursor.goto_parent():
                     return names
 
+    @execution_profiler
     def _default_python_exports(self, meta: dict) -> List[str]:
         """
         Fallback when __all__ is not present:
@@ -164,6 +167,7 @@ class TreeSitterMetadataExtractor:
     def __init__(self):
         pass
 
+    @execution_profiler
     def extract(self, file_path, repo_root=None):
         source_code = Path(file_path).read_bytes()
         language = self._detect_language(file_path)
@@ -244,6 +248,7 @@ class TreeSitterMetadataExtractor:
         return bool(return_annotation) or any(":" in p for p in params)
 
     @staticmethod
+    @execution_profiler
     def _extract_calls(node, source_code):
         calls = []
         cursor = node.walk()
@@ -273,6 +278,7 @@ class TreeSitterMetadataExtractor:
         return None, None, None
 
     @staticmethod
+    @execution_profiler
     def _extract_raises(node, source_code):
         raises = []
         cursor = node.walk()
@@ -295,6 +301,7 @@ class TreeSitterMetadataExtractor:
                     return raises
 
     @staticmethod
+    @execution_profiler
     def _extract_handled_exceptions(node, source_code):
         """
         Return list of exception types handled in try/except blocks within `node`.
@@ -328,6 +335,7 @@ class TreeSitterMetadataExtractor:
                     return handled
 
     # ---------------- HIGHER-LEVEL EXTRACTIONS ----------------
+    @execution_profiler
     def _extract_classes(self, root_node, source_code):
         classes = []
         cursor = root_node.walk()
@@ -366,6 +374,7 @@ class TreeSitterMetadataExtractor:
                 if not cursor.goto_parent():
                     return classes
 
+    @execution_profiler
     def _extract_class_variables(self, source_code, class_node):
         class_vars = []
         body_node = class_node.child_by_field_name("body")
@@ -423,6 +432,7 @@ class TreeSitterMetadataExtractor:
 
         return class_vars
 
+    @execution_profiler
     def _extract_functions(self, root_node, source_code, enclosing_class=None):
         funcs = []
         cursor = root_node.walk()
@@ -465,6 +475,7 @@ class TreeSitterMetadataExtractor:
                 if not cursor.goto_parent():
                     return funcs
 
+    @execution_profiler
     def _extract_imports(self, root_node, source_code):
         # Simplified for Python
         imports = []
@@ -483,6 +494,7 @@ class TreeSitterMetadataExtractor:
                     return imports
 
     @staticmethod
+    @execution_profiler
     def _extract_module_docstring_info(root_node, source_code):
         """
         Returns (docstring_text, start_line, end_line) for module-level docstring.
@@ -519,6 +531,7 @@ class TreeSitterMetadataExtractor:
             stack.extend(cur.children)
 
     # ---------- iterate module-level assignments, return (name, assign_node, rhs_node) ----------
+    @execution_profiler
     def _iter_module_assignments(self, root_node):
         """
         Finds module-level assignments:
@@ -559,6 +572,7 @@ class TreeSitterMetadataExtractor:
         return s if len(s) <= limit else s[: limit - 1] + "…"
 
     # ---------- the two extractors (rich dicts) ----------
+    @execution_profiler
     def _extract_variables(self, root_node, source_code):
         """
         Module-level variables (non-ALL_CAPS).
@@ -578,6 +592,7 @@ class TreeSitterMetadataExtractor:
             })
         return out
 
+    @execution_profiler
     def _extract_constants(self, root_node, source_code):
         """
         Module-level constants (ALL_CAPS per Python convention).

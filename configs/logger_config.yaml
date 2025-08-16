@@ -1,0 +1,4 @@
+logger:
+  name: "llm-assistant-for-code-repos"
+  level: "DEBUG"         # DEBUG, INFO, WARNING, ERROR, CRITICAL
+

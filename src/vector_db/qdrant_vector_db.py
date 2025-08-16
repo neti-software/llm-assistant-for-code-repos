@@ -13,6 +13,7 @@ from qdrant_client.models import (
 )
 
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
+from src.utils.profiler import execution_profiler
 
 
 class QdrantVectorDB:
@@ -39,6 +40,7 @@ class QdrantVectorDB:
       cfg["collection_settings"]["vector_size"]      -> int or "auto"
     """
 
+    @execution_profiler
     def __init__(self, cfg: Dict, embedding_model: EmbeddingBuilder):
         connection_cfg = cfg["connection"]
         collection_cfg = cfg["collection_settings"]
@@ -56,108 +58,7 @@ class QdrantVectorDB:
         self.distance_metric = self._DISTANCE_MAP[collection_cfg["distance_metric"]]
 
     # ------------- public API -------------
-    def create_collection_with_data(
-        self,
-        documents: Sequence[Dict[str, Any]],
-        overwrite_existing: bool = False,
-        create_payload_indexes: bool = True,
-    ) -> None:
-        # ---------------- Validate ----------------
-        if not documents:
-            raise ValueError("No documents provided")
-
-        # Find all embedding fields dynamically
-        embedding_keys = {
-            key
-            for doc in documents
-            for key in doc.keys()
-            if key.endswith("_to_embedded")
-        }
-        if not embedding_keys:
-            raise KeyError("No '*_to_embedded' fields found in documents")
-
-        # ---------------- Create collection ----------------
-        if overwrite_existing and self.qdrant_client.collection_exists(self.collection_name):
-            self.qdrant_client.delete_collection(self.collection_name)
-
-        if not self.qdrant_client.collection_exists(self.collection_name):
-            self.qdrant_client.recreate_collection(
-                collection_name=self.collection_name,
-                vectors_config={
-                    key: VectorParams(
-                        size=(self.embedding_model.get_dim_size_code() if key.startswith("code")
-                              else self.embedding_model.get_dim_size_text()),
-                        distance=Distance.COSINE,
-                    )
-                    for key in embedding_keys
-                },
-            )
-
-        vectors_config = {}
-        for key in embedding_keys:
-            # decide which embedding model to use
-            if key.startswith("code"):
-                dim = self.embedding_model.get_dim_size_code()
-                vectors_config[key] = VectorParams(size=dim, distance=Distance.COSINE)
-            else:
-                dim = self.embedding_model.get_dim_size_text()
-                vectors_config[key] = VectorParams(size=dim, distance=Distance.COSINE)
-
-        # ---------------- Prepare data ----------------
-        points = []
-        for doc in documents:
-            payload = doc.get("metadata", {})
-            vectors = {}
-
-            for key in embedding_keys:
-                value = doc.get(key)
-
-                if value is None or str(value).strip() == "":
-                    # dummy vector if missing
-                    dim = vectors_config[key].size
-                    vectors[key] = [0.0] * dim
-                else:
-                    if key.startswith("code"):
-                        vectors[key] = self.embedding_model.code_embed(str(value))
-                    else:
-                        vectors[key] = self.embedding_model.text_embed(str(value))
-
-            points.append(
-                PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector=vectors,  # ✅ always dict (multi-vector mode)
-                    payload=payload,
-                )
-            )
-
-        # ---------------- Upsert ----------------
-        if points:
-            self.qdrant_client.upsert(
-                collection_name=self.collection_name,
-                points=points,
-            )
-
-        # ---------------- Payload indexes ----------------
-        if create_payload_indexes:
-            fields_to_index = {
-                "repo": "keyword",
-                "path": "keyword",
-                "file_ext": "keyword",
-                "language": "keyword",
-                "namespace": "keyword",
-                "doc_kind": "keyword",
-                "tag": "keyword",
-                "imports": "keyword",
-                "calls": "keyword",
-                "symbol_name": "keyword",
-            }
-            for field_name, schema in fields_to_index.items():
-                self.qdrant_client.create_payload_index(
-                    self.collection_name,
-                    field_name=field_name,
-                    field_schema=schema,
-                )
-
+    @execution_profiler
     def search_collection(
             self,
             query_text: str,
@@ -203,12 +104,124 @@ class QdrantVectorDB:
                 query_filter=query_filter,
             )
 
-    # ------------- internals -------------
-    def _create_collection(self) -> None:
-        self.qdrant_client.create_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=self.embedding_model.get_dim_size_code(), distance=self.distance_metric),
-        )
+    @execution_profiler
+    def create_collection_with_data(
+            self,
+            documents: Sequence[Dict[str, Any]],
+            overwrite_existing: bool = False,
+            create_payload_indexes: bool = True,
+    ) -> None:
+        # Validate
+        embedding_keys = self._validate_documents(documents)
+
+        # Create/recreate collection
+        vectors_config = self._ensure_collection(embedding_keys, overwrite_existing)
+
+        # Prepare data
+        points = self._build_points(documents, embedding_keys, vectors_config)
+
+        # Upsert
+        if points:
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+            )
+
+        # Create indexes
+        if create_payload_indexes:
+            self._create_payload_indexes()
+
+    # ------------- private helpers -------------
+
+    def _validate_documents(self, documents: Sequence[Dict[str, Any]]) -> set[str]:
+        if not documents:
+            raise ValueError("No documents provided")
+
+        embedding_keys = {
+            key
+            for doc in documents
+            for key in doc.keys()
+            if key.endswith("_to_embedded")
+        }
+        if not embedding_keys:
+            raise KeyError("No '*_to_embedded' fields found in documents")
+
+        return embedding_keys
+
+    def _ensure_collection(self, embedding_keys: set[str], overwrite_existing: bool) -> Dict[str, VectorParams]:
+        if overwrite_existing and self.qdrant_client.collection_exists(self.collection_name):
+            self.qdrant_client.delete_collection(self.collection_name)
+
+        if not self.qdrant_client.collection_exists(self.collection_name):
+            self.qdrant_client.recreate_collection(
+                collection_name=self.collection_name,
+                vectors_config={
+                    key: self._vector_params_for_key(key)
+                    for key in embedding_keys
+                },
+            )
+
+        # always rebuild config dict (for use in embedding step)
+        return {key: self._vector_params_for_key(key) for key in embedding_keys}
+
+    def _vector_params_for_key(self, key: str) -> VectorParams:
+        if key.startswith("code"):
+            dim = self.embedding_model.get_dim_size_code()
+        else:
+            dim = self.embedding_model.get_dim_size_text()
+        return VectorParams(size=dim, distance=Distance.COSINE)
+
+    def _build_points(
+            self,
+            documents: Sequence[Dict[str, Any]],
+            embedding_keys: set[str],
+            vectors_config: Dict[str, VectorParams],
+    ) -> list[PointStruct]:
+        points = []
+        for doc in documents:
+            payload = doc.get("metadata", {})
+            vectors = {}
+
+            for key in embedding_keys:
+                value = doc.get(key)
+
+                if value is None or str(value).strip() == "":
+                    dim = vectors_config[key].size
+                    vectors[key] = [0.0] * dim
+                else:
+                    if key.startswith("code"):
+                        vectors[key] = self.embedding_model.code_embed(str(value))
+                    else:
+                        vectors[key] = self.embedding_model.text_embed(str(value))
+
+            points.append(
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=vectors,
+                    payload=payload,
+                )
+            )
+        return points
+
+    def _create_payload_indexes(self) -> None:
+        fields_to_index = {
+            "repo": "keyword",
+            "path": "keyword",
+            "file_ext": "keyword",
+            "language": "keyword",
+            "namespace": "keyword",
+            "doc_kind": "keyword",
+            "tag": "keyword",
+            "imports": "keyword",
+            "calls": "keyword",
+            "symbol_name": "keyword",
+        }
+        for field_name, schema in fields_to_index.items():
+            self.qdrant_client.create_payload_index(
+                self.collection_name,
+                field_name=field_name,
+                field_schema=schema,
+            )
 
     @staticmethod
     def _build_eq_filter(filters: Dict[str, Union[str, int, float, bool]]) -> Filter:
