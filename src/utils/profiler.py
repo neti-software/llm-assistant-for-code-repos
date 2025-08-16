@@ -19,7 +19,7 @@ class ExecutionProfiler:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, enable: bool = True, save_logs: bool = False):
+    def __init__(self):
         if self._initialized:
             return
         self._execution_times: Dict[str, List[float]] = {}

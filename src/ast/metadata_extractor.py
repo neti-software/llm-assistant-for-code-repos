@@ -1,156 +1,9 @@
 from pathlib import Path
-from typing import Dict, Any, List, Optional
 from tree_sitter_languages import get_parser
 from src.utils.profiler import execution_profiler
 
 
-class RepoMetadataManager:
-    def __init__(self, repo_path):
-        self.repo_path = Path(repo_path).resolve()
-        self.extractor = TreeSitterMetadataExtractor()
-
-    @execution_profiler
-    def process_repo(self) -> Dict[str, dict]:
-        results: Dict[str, dict] = {}
-        for file_path in self.repo_path.rglob("*"):
-            if not file_path.is_file():
-                continue
-            if file_path.suffix.lower() not in self.extractor._SUPPORTED_EXTENSIONS:
-                continue
-
-            file_meta = self.extractor.extract(file_path, repo_root=self.repo_path)
-            rel_path = file_path.relative_to(self.repo_path).as_posix()
-            results[rel_path] = file_meta
-
-        # Map: file → namespace
-        namespaces = {
-            rel: self._python_module_name(rel)
-            for rel, meta in results.items()
-            if meta.get("language") == "python" # TODO
-        }
-
-        # Fill namespaces
-        for rel, meta in results.items():
-            if meta.get("language") == "python":  # TODO
-                meta["namespace"] = namespaces.get(rel, "")
-
-        # Reverse imports: file → list of files that import it
-        reverse_imports: Dict[str, List[str]] = {rel: [] for rel in results}
-        for importer_rel, importer_meta in results.items():
-            for imp in importer_meta.get("imports", []):
-                for target_rel, target_ns in namespaces.items():
-                    if target_ns and target_ns in imp:
-                        reverse_imports[target_rel].append(importer_rel)
-
-        # Assign exports as “files that import me”
-        for rel in results:
-            results[rel]["exports"] = reverse_imports[rel]
-
-        return results
-
-    # ---------------- Repo-wide helpers (Python) ----------------
-    @execution_profiler
-    def _python_module_name(self, rel_path_str: str) -> str:
-        """
-        Compute module path like `pkg.subpkg.module` using the chain of
-        directories that contain __init__.py. If a directory doesn't
-        contain __init__.py, it breaks the package chain.
-        """
-        rel = Path(rel_path_str)
-        parts = list(rel.parts)
-        # separate dirs + file
-        dirs, file_name = parts[:-1], parts[-1]
-        stem = Path(file_name).stem
-
-        pkg_parts: List[str] = []
-        current = self.repo_path
-        for d in dirs:
-            current = current / d
-            if (current / "__init__.py").exists(): # TODO
-                pkg_parts.append(d)
-            else:
-                # non-package dir: reset chain (pkg roots must be contiguous)
-                pkg_parts = []
-
-        if stem == "__init__": # TODO
-            # For __init__.py, the module is the package itself
-            return ".".join(pkg_parts)
-        else:
-            return ".".join(pkg_parts + [stem]) if pkg_parts else stem
-
-    @execution_profiler
-    def _parse_dunder_all(self, file_path: Path) -> List[str]:
-        """
-        Parse __all__ = ["a", "b", ...] from a file using tree-sitter.
-        Only handles simple list/tuple of string literals (most common case).
-        """
-        try:
-            src = file_path.read_bytes()
-        except Exception:
-            return []
-        parser = get_parser("python")  # TODO
-        tree = parser.parse(src)
-        root = tree.root_node
-
-        def decode(n):
-            return src[n.start_byte:n.end_byte].decode("utf-8")
-
-        names: List[str] = []
-        cursor = root.walk()
-        seen = set()
-        while True:
-            n = cursor.node
-            if n.id not in seen:
-                seen.add(n.id)
-                if n.type == "assignment":
-                    # left side could be an identifier __all__
-                    lhs = None
-                    for ch in n.children:
-                        if ch.type == "identifier":
-                            lhs = decode(ch)
-                            break
-                    if lhs == "__all__":
-                        # right side should be list/tuple of strings ideally
-                        rhs = None
-                        for ch in n.children[::-1]:
-                            if ch.type in ("list", "tuple"):
-                                rhs = ch
-                                break
-                        if rhs:
-                            for elem in rhs.children:
-                                if elem.type in ("string", "concatenated_string", "f_string"):
-                                    text = decode(elem).strip()
-                                    # strip quotes (simple)
-                                    if len(text) >= 2 and text[0] in "\"'":
-                                        text = text.strip("\"'")
-                                    names.append(text)
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return names
-
-    @execution_profiler
-    def _default_python_exports(self, meta: dict) -> List[str]:
-        """
-        Fallback when __all__ is not present:
-        - public top-level classes (not starting with '_')
-        - public top-level functions (enclosing_class is None, not starting with '_')
-        """
-        exports: List[str] = []
-        for cls in meta.get("classes", []):
-            name = cls.get("symbol_name") or ""
-            if name and not name.startswith("_"):
-                exports.append(name)
-        for fn in meta.get("functions", []):
-            if fn.get("enclosing_class") is None:
-                name = fn.get("symbol_name") or ""
-                if name and not name.startswith("_"):
-                    exports.append(name)
-        return exports
-
-
-class TreeSitterMetadataExtractor:
+class MetadataExtractor:
     _SUPPORTED_EXTENSIONS = {
         ".py": "python",
         ".js": "javascript",
@@ -211,45 +64,40 @@ class TreeSitterMetadataExtractor:
     def _is_async(node):
         return any(child.type == "async" for child in node.children)
 
-    @staticmethod
-    def _extract_bases(node, source_code):
+    def _extract_bases(self, node, source_code):
         bases_node = node.child_by_field_name("superclasses")
         if not bases_node:
             return []
-        return [TreeSitterMetadataExtractor._decode(source_code, child)
+        return [self._decode(source_code, child)
                 for child in bases_node.children if child.type != ","]
 
-    @staticmethod
-    def _extract_decorators(node, source_code):
+    def _extract_decorators(self, node, source_code):
         decorators = []
         for child in node.children:
             if child.type == "decorator":
-                decorators.append(TreeSitterMetadataExtractor._decode(source_code, child))
+                decorators.append(self._decode(source_code, child))
         return decorators
 
-    @staticmethod
-    def _extract_parameters(node, source_code):
+    def _extract_parameters(self, node, source_code):
         params_node = node.child_by_field_name("parameters")
         params = []
         if not params_node:
             return params
         for child in params_node.children:
             if child.type in ("identifier", "typed_parameter", "default_parameter"):
-                params.append(TreeSitterMetadataExtractor._decode(source_code, child))
+                params.append(self._decode(source_code, child))
         return params
 
-    @staticmethod
-    def _extract_return_annotation(node, source_code):
+    def _extract_return_annotation(self, node, source_code):
         ret_node = node.child_by_field_name("return_type")
-        return TreeSitterMetadataExtractor._decode(source_code, ret_node) if ret_node else None
+        return self._decode(source_code, ret_node) if ret_node else None
 
     @staticmethod
     def _has_type_annotations(params, return_annotation):
         return bool(return_annotation) or any(":" in p for p in params)
 
-    @staticmethod
     @execution_profiler
-    def _extract_calls(node, source_code):
+    def _extract_calls(self, node, source_code):
         calls = []
         cursor = node.walk()
         visited = set()
@@ -259,27 +107,25 @@ class TreeSitterMetadataExtractor:
                 visited.add(n.id)
                 if n.type == "call":
                     calls.append(
-                        TreeSitterMetadataExtractor._decode(source_code, n.child_by_field_name("function")))
+                        self._decode(source_code, n.child_by_field_name("function")))
             if cursor.goto_first_child():
                 continue
             while not cursor.goto_next_sibling():
                 if not cursor.goto_parent():
                     return calls
 
-    @staticmethod
-    def _extract_docstring_info(node, source_code):
+    def _extract_docstring_info(self, node, source_code):
         body_node = node.child_by_field_name("body")
         if body_node and body_node.children:
             first_stmt = body_node.children[0]
             if first_stmt.type == "expression_statement" and first_stmt.children and first_stmt.children[
                 0].type == "string":
-                text = TreeSitterMetadataExtractor._decode(source_code, first_stmt).strip("\"'")
+                text = self._decode(source_code, first_stmt).strip("\"'")
                 return text, first_stmt.start_point[0] + 1, first_stmt.end_point[0] + 1
         return None, None, None
 
-    @staticmethod
     @execution_profiler
-    def _extract_raises(node, source_code):
+    def _extract_raises(self, node, source_code):
         raises = []
         cursor = node.walk()
         visited = set()
@@ -292,7 +138,7 @@ class TreeSitterMetadataExtractor:
                     if expr is None and n.children:
                         expr = n.children[1]  # usually after the 'raise' keyword
                     if expr:
-                        text = TreeSitterMetadataExtractor._decode(source_code, expr)
+                        text = self._decode(source_code, expr)
                         raises.append(text.strip())
             if cursor.goto_first_child():
                 continue
@@ -300,9 +146,8 @@ class TreeSitterMetadataExtractor:
                 if not cursor.goto_parent():
                     return raises
 
-    @staticmethod
     @execution_profiler
-    def _extract_handled_exceptions(node, source_code):
+    def _extract_handled_exceptions(self, node, source_code):
         """
         Return list of exception types handled in try/except blocks within `node`.
         Handles:
@@ -323,7 +168,7 @@ class TreeSitterMetadataExtractor:
                     # preferred: field 'type' holds the exception expression
                     exc = n.child_by_field_name("type")
                     if exc:
-                        handled.append(TreeSitterMetadataExtractor._decode(source_code, exc))
+                        handled.append(self._decode(source_code, exc))
                     else:
                         # bare `except:`
                         handled.append("Exception")
@@ -493,9 +338,8 @@ class TreeSitterMetadataExtractor:
                 if not cursor.goto_parent():
                     return imports
 
-    @staticmethod
     @execution_profiler
-    def _extract_module_docstring_info(root_node, source_code):
+    def _extract_module_docstring_info(self, root_node, source_code):
         """
         Returns (docstring_text, start_line, end_line) for module-level docstring.
         If no docstring at the top of the file, returns (None, None, None).
@@ -505,7 +349,7 @@ class TreeSitterMetadataExtractor:
             first_stmt = root_node.children[0]
             if first_stmt.type == "expression_statement" and first_stmt.children and first_stmt.children[
                 0].type == "string":
-                text = TreeSitterMetadataExtractor._decode(source_code, first_stmt).strip("\"'")
+                text = self._decode(source_code, first_stmt).strip("\"'")
                 return text, first_stmt.start_point[0] + 1, first_stmt.end_point[0] + 1
         return None, None, None
 
