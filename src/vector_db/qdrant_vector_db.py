@@ -215,6 +215,7 @@ class QdrantVectorDB:
             "imports": "keyword",
             "calls": "keyword",
             "symbol_name": "keyword",
+            "symbol_kind": "keyword",
         }
         for field_name, schema in fields_to_index.items():
             self.qdrant_client.create_payload_index(
