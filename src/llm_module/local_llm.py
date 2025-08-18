@@ -53,12 +53,23 @@ async def chat_completions(request: Request):
     # Flatten messages → prompt
     prompt = "".join(f"{m['role']}: {m['content']}\n" for m in messages) + "assistant:"
 
+    # Build kwargs for llama.cpp
     kwargs = dict(
         prompt=prompt,
         max_tokens=data.get("max_tokens", 512),
         temperature=data.get("temperature", 0.7),
         stop=["</s>"],
     )
+
+    # 👇 NEW: enable grammar if json_schema is provided
+    if "json_schema" in data and data["json_schema"]:
+        assert LlamaGrammar is not None, "llama_cpp grammar support not available"
+        schema_str = json.dumps(data["json_schema"])
+        grammar = LlamaGrammar.from_json_schema(schema_str)
+        kwargs["grammar"] = grammar
+        print("[MCP] Grammar enabled for this request.")
+
+    # Run inference
     out = llm_instance(**kwargs)
     text = out["choices"][0]["text"]
 
@@ -150,20 +161,32 @@ async def completions(request: Request):
 
     data = await request.json()
 
-    # Case 1: Chat-style (OpenAI format)
-    if "messages" in data:
+    # If client supplies stop sequences, use them; else default to EOS
+    stop = data.get("stop") or ["</s>"]
+
+    # Optional: JSON schema → grammar (works for both branches)
+    grammar = None
+    if "json_schema" in data and data["json_schema"]:
+        assert LlamaGrammar is not None, "llama_cpp grammar support not available"
+        schema_str = json.dumps(data["json_schema"])
+        grammar = LlamaGrammar.from_json_schema(schema_str)
+
+    # Case 1: Chat-style (OpenAI-like)
+    if "messages" in data and data["messages"]:
         model = data.get("model", os.getenv("LLM_MODEL_ID", "local-llm"))
         messages = data["messages"]
 
-        # Build a prompt string from messages
+        # Minimal, generic flattening; client can pre-flatten too
         prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
 
         kwargs = dict(
             prompt=prompt,
             max_tokens=data.get("max_tokens", 512),
             temperature=data.get("temperature", 0.7),
-            stop=["</s>"],
+            stop=stop,
         )
+        if grammar is not None:
+            kwargs["grammar"] = grammar
 
         out = llm_instance(**kwargs)
         text = out["choices"][0]["text"]
@@ -180,23 +203,20 @@ async def completions(request: Request):
             }]
         })
 
-    # Case 2: Legacy prompt-style (your old tests)
+    # Case 2: Legacy prompt-style
     else:
         kwargs = dict(
             prompt=data["prompt"],
             max_tokens=data.get("max_tokens", 512),
             temperature=data.get("temperature", 0.7),
-            stop=["</s>"],
+            stop=stop,  # ← do NOT overwrite; use client’s stop if provided
         )
-
-        if "json_schema" in data and data["json_schema"]:
-            assert LlamaGrammar is not None, "llama_cpp grammar support not available"
-            schema_str = json.dumps(data["json_schema"])
-            grammar = LlamaGrammar.from_json_schema(schema_str)
+        if grammar is not None:
             kwargs["grammar"] = grammar
 
         out = llm_instance(**kwargs)
         return JSONResponse(out)
+
 
 
 # ============================================================
@@ -315,12 +335,38 @@ class LocalLLM(LLMABC):
         self._wait_for_server(timeout_s=30.0)
 
     @execution_profiler
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: Optional[str] = None, **kwargs) -> str:
+        """
+        Supports either a raw 'prompt' OR OpenAI-style 'messages'.
+        When 'messages' is provided, we build a minimal chat prompt that
+        ends with a single 'Assistant:' cue and pass stop tokens through.
+        """
         payload = {
-            "prompt": prompt,
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "temperature": kwargs.get("temperature", self.temperature),
         }
+
+        messages = kwargs.get("messages")
+        if messages:
+            # Extract first system (optional) and the LAST user turn
+            system_msg = next((m["content"] for m in messages if m.get("role") == "system"), "")
+            last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+
+            # Minimal, generic prompt: instruction + last user + single assistant cue
+            prompt_str = ""
+            if system_msg:
+                prompt_str += system_msg.strip() + "\n\n"
+            prompt_str += f"User: {last_user}\nAssistant:"
+
+            payload["prompt"] = prompt_str
+
+            # Strong stops so model doesn't simulate the other side
+            payload["stop"] = kwargs.get("stop") or ["User:", "System:", "Assistant:\nUser:"]
+        else:
+            payload["prompt"] = prompt or ""
+            payload["stop"] = kwargs.get("stop") or ["</s>"]
+
+        # Optional JSON schema → enforce grammar on server
         if "json_schema" in kwargs and kwargs["json_schema"]:
             payload["json_schema"] = kwargs["json_schema"]
 
@@ -332,7 +378,6 @@ class LocalLLM(LLMABC):
             print("[LocalLLM] --- Server returned error body ---")
             print(r.text)
             try:
-                # also try to pull the last traceback from server
                 dbg = requests.get(f"{self.endpoint}/_last_error", timeout=1.5)
                 if dbg.text.strip():
                     print("[LocalLLM] --- Server traceback ---")
