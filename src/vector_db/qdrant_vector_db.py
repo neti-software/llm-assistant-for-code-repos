@@ -47,9 +47,9 @@ class QdrantVectorDB:
 
         self.qdrant_client = QdrantClient(
             url=connection_cfg["host_url"],
-            timeout=float(connection_cfg["request_timeout_sec"])
+            timeout=5
         )
-        self.collection_name = connection_cfg["collection_name"]
+        # self.collection_name = connection_cfg["collection_name"]
 
         # Embedding model
         self.embedding_model = embedding_model
@@ -61,6 +61,7 @@ class QdrantVectorDB:
     @execution_profiler
     def search_collection(
             self,
+            collection_name: str,
             query_text: str,
             top_k: int = 5,
             filter_conditions: Optional[Dict[str, Union[str, int, float, bool]]] = None,
@@ -77,14 +78,14 @@ class QdrantVectorDB:
         if per_field:
             # ✅ return top-k per field
             code_results = self.qdrant_client.search(
-                collection_name=self.collection_name,
+                collection_name=collection_name,
                 query_vector=("code_to_embedded", query_code_vector),
                 limit=top_k,
                 with_payload=include_payload,
                 query_filter=query_filter,
             )
             doc_results = self.qdrant_client.search(
-                collection_name=self.collection_name,
+                collection_name=collection_name,
                 query_vector=("doc_to_embedded", query_doc_vector),
                 limit=top_k,
                 with_payload=include_payload,
@@ -97,12 +98,15 @@ class QdrantVectorDB:
             # So here we just pick one field as "primary".
             # Later we could implement weighted fusion.
             return self.qdrant_client.search(
-                collection_name=self.collection_name,
+                collection_name=collection_name,
                 query_vector=("code_to_embedded", query_code_vector),
                 limit=top_k,
                 with_payload=include_payload,
                 query_filter=query_filter,
             )
+
+    def set_collection_name(self, collection_name): # TODO remove self.collection_name , make it fully dynamic per project
+        self.collection_name = collection_name
 
     @execution_profiler
     def create_collection_with_data(

@@ -6,26 +6,26 @@ from src.ast.metadata_extractor import MetadataExtractor
 
 
 class MetadataExtractorManager:
-    def __init__(self, repo_path):
-        self.repo_path = Path(repo_path).resolve()
+    def __init__(self):
         self.extractor = MetadataExtractor()
 
     @execution_profiler
-    def process_repo(self) -> Dict[str, dict]:
+    def process_repo(self, repo_path) -> Dict[str, dict]:
+        repo_path = Path(repo_path).resolve()
         results: Dict[str, dict] = {}
-        for file_path in self.repo_path.rglob("*"):
+        for file_path in repo_path.rglob("*"):
             if not file_path.is_file():
                 continue
             if file_path.suffix.lower() not in self.extractor._SUPPORTED_EXTENSIONS:
                 continue
 
-            file_meta = self.extractor.extract(file_path, repo_root=self.repo_path)
-            rel_path = file_path.relative_to(self.repo_path).as_posix()
+            file_meta = self.extractor.extract(file_path, repo_root=repo_path)
+            rel_path = file_path.relative_to(repo_path).as_posix()
             results[rel_path] = file_meta
 
         # Map: file → namespace
         namespaces = {
-            rel: self._python_module_name(rel)
+            rel: self._python_module_name(repo_path, rel)
             for rel, meta in results.items()
             if meta.get("language") == "python"  # TODO
         }
@@ -51,7 +51,7 @@ class MetadataExtractorManager:
 
     # ---------------- Repo-wide helpers (Python) ----------------
     @execution_profiler
-    def _python_module_name(self, rel_path_str: str) -> str:
+    def _python_module_name(self, repo_path:Path , rel_path_str: str) -> str:
         """
         Compute module path like `pkg.subpkg.module` using the chain of
         directories that contain __init__.py. If a directory doesn't
@@ -64,7 +64,7 @@ class MetadataExtractorManager:
         stem = Path(file_name).stem
 
         pkg_parts: List[str] = []
-        current = self.repo_path
+        current = repo_path
         for d in dirs:
             current = current / d
             if (current / "__init__.py").exists():  # TODO
