@@ -1,8 +1,7 @@
-llm:
-  type: "local"          # local | cloud
-  model: "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/models/qwen2.5-7b-q4_k_m-imat.gguf"
-  endpoint: "http://127.0.0.1:8000"
-  api_key: null          # only for cloud
-  context_length: 4096
-  max_tokens: 512
-  temperature: 0.7
+type: "cloud"
+model: "gpt-5-nano"
+context_length: 400000
+max_completion_tokens: 32000
+tool_choice: "auto"
+path_to_api_key: "configs/openai_key.yaml"
+path_to_prompt_config: "configs/prompt_config.yaml"

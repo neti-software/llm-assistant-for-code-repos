@@ -4,6 +4,7 @@ from typing import Union, Dict, Any
 import logging
 import traceback
 from abc import ABCMeta
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,31 @@ def load_yaml(path: Union[str, Path]) -> Dict:
     if not isinstance(data, dict):
         raise TypeError("YAML root must be a mapping (dict).")
     return data
+
+
+def load_json(source: Union[str, Path], from_string: bool = False) -> Any:
+    if from_string:
+        return json.loads(source)
+
+    path = Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"JSON file not found: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def format_rag_context(question: str, results: list[dict]) -> str:
+    formatted = {
+        "question": question,
+        "rag_results": [
+            {
+                "id": i,
+                "snippet": r["value"].strip(),
+            }
+            for i, r in enumerate(results, 1)
+        ],
+    }
+    return json.dumps(formatted, indent=2)
 
 
 class SingletonMeta(type):
