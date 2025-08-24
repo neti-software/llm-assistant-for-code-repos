@@ -4,22 +4,32 @@ from src.utils.helper import load_yaml, load_json
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
+from src.tools_to_call.fetch_file_from_patch import fetch_file_from_patch
+
 
 from colorama import Fore, Style, init
 
+# Initialize colorama
+init(autoreset=True)
 
-def chat_loop(llm, manager_qdrant_vector_db, tool_manager, conversation_history):
-    question_msg = conversation_history.get_user_question()
-    results = manager_qdrant_vector_db.search(question_msg, top_k=3)
+def foo_minimalize_rag_results(res, full_mode: bool = False):
+    formated_results = []
+    for r in res:
+        formated_dcit= {}
+        formated_dcit['path_to_file'] = r['metadata']['repo'] + "/" + r['metadata']['path']
+        if full_mode:
+            formated_dcit['value']  = fetch_file_from_patch(formated_dcit['path_to_file'])
+        else:
+            formated_dcit['value'] = r['value']
 
-    # Step 0: RAG search
-    conversation_history.add_rag_results(results)
+        formated_dcit['score'] = round(r['score'],3)
 
-    # Format for LLM
 
-    # Initialize colorama
-    init(autoreset=True)
+        formated_results.append(formated_dcit)
+    return formated_results
 
+
+def chat_loop(llm, tool_manager, conversation_history):
     iteration = 0
     while True:
         # --- Iteration Header ---
@@ -38,7 +48,8 @@ def chat_loop(llm, manager_qdrant_vector_db, tool_manager, conversation_history)
 
         # --- Tool Call ---
         print(f"{Fore.YELLOW}Calling tool: {resp.get('action', 'N/A')}")
-        tool_result = tool_manager.call_tool(results, resp)
+        tool_result = tool_manager.call_tool(resp)
+        tool_result = foo_minimalize_rag_results(tool_result)
         print(f"{Fore.YELLOW}Tool Result:{Style.RESET_ALL} {tool_result}\n")
 
         conversation_history.add_tool_call(resp["action"], resp.get("args", {}), tool_result)
@@ -53,18 +64,24 @@ def chat_loop(llm, manager_qdrant_vector_db, tool_manager, conversation_history)
 # ----------------------
 # Main runner
 # ----------------------
-llm_config = load_yaml("/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/configs/llm_config.yaml")
-embedding_config = load_yaml("/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/configs/embedding_config.yaml")
-qdrant_config = load_yaml("/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/configs/qdrant_config.yaml")
-conversation_history_config = load_yaml(
-    "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/configs/conversation_history.yaml")
+llm_config = load_yaml("configs/llm_config.yaml")
+embedding_config = load_yaml("configs/embedding_config.yaml")
+qdrant_config = load_yaml("configs/qdrant_config.yaml")
+conversation_history_config = load_yaml("configs/conversation_history.yaml")
 
 llm = CloudLLM(llm_config)
-tool_manager = ToolManager()
 
 manager_qdrant_vector_db = ManagerQdrantVectorDb(config=qdrant_config, embedding_config=embedding_config)
-# manager_qdrant_vector_db.create_vector_db_from_dir("DATA_TO_TEST")  # For first time only. Use 'docker run -p 6333:6333 qdrant/qdrant'
 
-question_to_test = load_json('json_question_to_test.json')["2"]
+# For first time only. Use 'docker run -p 6333:6333 qdrant/qdrant'
+# manager_qdrant_vector_db.create_vector_db_from_dir("DATA_TO_TEST")
+
+question_to_test = load_json('json_question_to_test.json')["5"]
 conversation_history = ConversationHistory(conversation_history_config, question_to_test)
-chat_loop(llm, manager_qdrant_vector_db, tool_manager, conversation_history)
+
+tool_manager = ToolManager()
+tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
+# xx = manager_qdrant_vector_db.search(question_to_test)
+# y = foo_minimalize_rag_results(xx)
+
+chat_loop(llm, tool_manager, conversation_history)

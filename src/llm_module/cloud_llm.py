@@ -108,3 +108,40 @@ class CloudLLM(LLMABC):
 
         else:
             raise RuntimeError(f"Unexpected finish_reason: {choice.finish_reason}")
+
+        # # inside CloudLLM.generate after resp = self.client.chat.completions.create(...)
+        # choice = resp.choices[0]
+        # msg = choice.message
+        #
+        # # 1) Prefer explicit tool_calls array if present (some SDKs provide this)
+        # tool_calls = getattr(msg, "tool_calls", None) or msg.get("tool_calls") if isinstance(msg, dict) else None
+        #
+        # if tool_calls and len(tool_calls) > 0:
+        #     tool_call = tool_calls[0]
+        #     # arguments might already be a dict or a JSON string depending on SDK
+        #     args_raw = getattr(tool_call.function, "arguments", None) or tool_call.function.arguments
+        #     try:
+        #         args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+        #     except Exception:
+        #         args = {"raw": args_raw}
+        #     return True, {"action": tool_call.function.name, "args": args}
+        #
+        # # 2) Fallback: some responses use finish_reason == "tool_calls"
+        # if getattr(choice, "finish_reason", "") == "tool_calls":
+        #     tool_call = msg.tool_calls[0]
+        #     args_raw = tool_call.function.arguments
+        #     try:
+        #         args = json.loads(args_raw)
+        #     except Exception:
+        #         args = args_raw
+        #     return True, {"action": tool_call.function.name, "args": args}
+        #
+        # # 3) Otherwise plain text response
+        # if getattr(choice, "finish_reason", "") in ("stop", "completed", None):
+        #     content = (msg.content.strip() if getattr(msg, "content", None) else (
+        #         msg.get("content") if isinstance(msg, dict) else ""))
+        #     return False, {"action": "response", "content": content}
+        #
+        # # 4) Anything unexpected
+        # raise RuntimeError(f"Unexpected finish_reason / message shape: {choice.finish_reason}")
+
