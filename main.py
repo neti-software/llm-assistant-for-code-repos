@@ -12,11 +12,11 @@ from colorama import Fore, Style, init
 # Initialize colorama
 init(autoreset=True)
 
-def foo_minimalize_rag_results(res, full_mode: bool = False):
+def foo_minimalize_rag_results(res, full_mode: bool = True):
     formated_results = []
     for r in res:
         formated_dcit= {}
-        formated_dcit['path_to_file'] = r['metadata']['repo'] + "/" + r['metadata']['path']
+        formated_dcit['path_to_file'] = r['metadata']['project'] + "/" + r['metadata']['path']
         if full_mode:
             formated_dcit['value']  = fetch_file_from_patch(formated_dcit['path_to_file'])
         else:
@@ -76,7 +76,7 @@ manager_qdrant_vector_db = ManagerQdrantVectorDb(config=qdrant_config, embedding
 # For first time only. Use 'docker run -p 6333:6333 qdrant/qdrant'
 # manager_qdrant_vector_db.create_vector_db_from_dir("DATA_TO_TEST")
 
-question_to_test = load_json('json_question_to_test.json')["5"]
+question_to_test = load_json('json_question_to_test.json')["9"]
 conversation_history = ConversationHistory(conversation_history_config, question_to_test)
 
 tool_manager = ToolManager()

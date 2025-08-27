@@ -1,0 +1,10 @@
+{
+  "path": { "type": "string", "value": "any" },
+  "symbol_name": { "type": "string", "value": "any" },
+  "docstring": { "type": ["string", "null"], "value": "any" },
+  "start_line_documentation": { "type": ["integer", "null"], "value": "any" },
+  "end_line_documentation": { "type": ["integer", "null"], "value": "any" },
+  "start_line_code": { "type": "integer", "value": "any" },
+  "end_line_code": { "type": "integer", "value": "any" },
+  "methods": { "type": "array", "items": { "$ref": "function_metadata_schema" }, "value": "any" }
+}

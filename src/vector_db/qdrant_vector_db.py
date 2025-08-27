@@ -163,6 +163,7 @@ class QdrantVectorDB:
                     key: self._vector_params_for_key(key)
                     for key in embedding_keys
                 },
+                on_disk_payload=True
             )
 
         # always rebuild config dict (for use in embedding step)
@@ -183,7 +184,7 @@ class QdrantVectorDB:
     ) -> list[PointStruct]:
         points = []
         for doc in documents:
-            payload = doc.get("metadata", {})
+            metadata = doc.get("metadata", {})
             vectors = {}
 
             for key in embedding_keys:
@@ -202,24 +203,27 @@ class QdrantVectorDB:
                 PointStruct(
                     id=str(uuid.uuid4()),
                     vector=vectors,
-                    payload=payload,
+                    payload={
+                        "project": metadata['repo'],
+                        "path": metadata['path'],
+                        "file_ext": metadata['file_ext'],
+                        "language": metadata['language'],
+                        "symbol_kind": metadata['symbol_kind'],
+                        "doc_kind": metadata["doc_kind"],
+                        "metadata": metadata  # full 20-30 fields
+                    },
                 )
             )
         return points
 
     def _create_payload_indexes(self) -> None:
         fields_to_index = {
-            "repo": "keyword",
+            "project": "keyword",
             "path": "keyword",
             "file_ext": "keyword",
             "language": "keyword",
-            "namespace": "keyword",
-            "doc_kind": "keyword",
-            "tag": "keyword",
-            "imports": "keyword",
-            "calls": "keyword",
-            "symbol_name": "keyword",
             "symbol_kind": "keyword",
+            "doc_kind": "keyword",
         }
         for field_name, schema in fields_to_index.items():
             self.qdrant_client.create_payload_index(

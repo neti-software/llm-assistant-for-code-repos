@@ -1,5 +1,5 @@
 type: "cloud"
-model: "gpt-5-nano"
+model: "gpt-5-mini"
 context_length: 400000
 max_completion_tokens: 32000
 tool_choice: "auto"

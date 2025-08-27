@@ -1,20 +1,3 @@
-from src.vector_db.qdrant_vector_db import QdrantVectorDB
-
-from pathlib import Path
-from typing import Dict, Any, List
-import json
-
-from src.ast.repo_metadata_manager import MetadataExtractorManager
-from src.vector_db.qdrant_vector_db import QdrantVectorDB
-from src.embedding_module.emmbeding_builder import EmbeddingBuilder
-from src.utils.helper import load_yaml
-from src.utils.profiler import execution_profiler
-
-import subprocess
-import shlex
-import time
-import requests
-
 import subprocess
 import shlex
 import time
@@ -22,10 +5,11 @@ import requests
 import glob
 import os
 from heapq import nlargest
-from typing import Dict, Any
 from src.ast.repo_metadata_manager import MetadataExtractorManager
 from src.vector_db.helpers_vector_db import *
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
+from src.vector_db.qdrant_vector_db import QdrantVectorDB
+from src.utils.profiler import execution_profiler
 
 
 class ManagerQdrantVectorDb:
@@ -137,7 +121,7 @@ class ManagerQdrantVectorDb:
                     all_hits.append({
                         "collection": cname,
                         "field": field,
-                        "value": hit.payload.get(field, "<missing>"),
+                        "value": hit.payload["metadata"].get(field, "<missing>"),
                         "score": score,
                         "metadata": hit.payload
                     })
