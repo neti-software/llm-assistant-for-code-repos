@@ -4,19 +4,6 @@ from src.utils.profiler import execution_profiler
 
 
 class MetadataExtractor:
-    _SUPPORTED_EXTENSIONS = {
-        ".py": "python",
-        ".js": "javascript",
-        ".ts": "typescript",
-        ".java": "java",
-        ".cpp": "cpp",
-        ".c": "c",
-        ".cs": "c_sharp",
-        ".go": "go",
-        ".rs": "rust",
-        ".php": "php",
-    }
-
     def __init__(self):
         pass
 
