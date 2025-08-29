@@ -1,0 +1,75 @@
+from pathlib import Path
+from typing import Dict
+from src.utils.profiler import execution_profiler
+from src.ast.metadata_extractor_python import MetadataExtractorPython
+from src.ast.metadata_extractor_go import MetadataExtractorGo
+from src.ast.metadata_extractor_javascript import MetadataExtractorJS
+from src.ast.metadata_extractor_rust import MetadataExtractorRust
+from src.ast.metadata_validator import MetadataValidator
+
+
+class MetadataExtractorManager:
+    def __init__(self, metadata_schema):
+        self.metadata_validator = MetadataValidator(metadata_schema)
+
+        # simple extension -> extractor map
+        self._extractor_by_ext = {
+            ".py": MetadataExtractorPython(),
+            ".go": MetadataExtractorGo(),
+            ".js": MetadataExtractorJS(),
+            ".mjs": MetadataExtractorJS(),
+            ".cjs": MetadataExtractorJS(),
+            ".rs": MetadataExtractorRust(),
+        }
+
+    @execution_profiler
+    def process_repo(self, repo_path) -> Dict[str, dict]:
+        repo_path = Path(repo_path).resolve()
+        results: Dict[str, dict] = {}
+
+        for file_path in repo_path.rglob("*"):
+            if not file_path.is_file():
+                continue
+
+            suffix = file_path.suffix.lower()
+            extractor = self._extractor_by_ext.get(suffix)
+            if extractor is None:
+                # skip unknown extensions
+                continue
+
+            rel_path = file_path.relative_to(repo_path).as_posix()
+            try:
+                meta = extractor.extract(str(file_path), repo_root=str(repo_path))
+                # normalize expected fields minimally
+                if isinstance(meta, dict):
+                    meta.setdefault("repo", repo_path.name)
+                    meta.setdefault("path", rel_path)
+                    meta.setdefault("file_ext", suffix)
+                else:
+                    meta = {
+                        "repo": repo_path.name,
+                        "path": rel_path,
+                        "file_ext": suffix,
+                        "language": "",
+                        "classes": None,
+                        "functions": None,
+                    }
+            except Exception as e:
+                meta = {
+                    "repo": repo_path.name,
+                    "path": rel_path,
+                    "file_ext": suffix,
+                    "language": "",
+                    "error": repr(e),
+                }
+
+            is_any_errors = self.metadata_validator.validate(meta)
+            if is_any_errors:
+                print(f"[VALIDATION ERROR] {rel_path}: {is_any_errors}")
+                continue
+
+            results[rel_path] = meta
+
+        return results
+
+

@@ -1,0 +1,65 @@
+{
+  "global": {
+    "repo": {
+      "type": "string",
+      "value": "any"
+    },
+    "path": {
+      "type": "string",
+      "value": "any"
+    },
+    "file_ext": {
+      "type": "string",
+      "value": [".py", ".go", ".js", ".rs"]
+    },
+    "language": {
+      "type": "string",
+      "value": ["python", "go", "javascript", "rust"]
+    },
+    "namespace": {
+      "type": "string",
+      "value": "any"
+    },
+    "doc_kind": {
+      "type": "string",
+      "value": ["code", "documentation"]
+    },
+    "module_docstring_end": {
+      "type": ["integer", "null"],
+      "value": "any"
+    },
+    "imports": {
+      "type": ["array", "null"],
+      "value": "any"
+    },
+    "classes": {
+      "type": ["array", "null"],
+      "items": { "$ref": "class" }
+    },
+    "functions": {
+      "type": ["array", "null"],
+      "items": { "$ref": "function" }
+    }
+  },
+  "class": {
+    "path": { "type": "string", "value": "any" },
+    "symbol_name": { "type": "string", "value": "any" },
+    "docstring": { "type": ["string", "null"], "value": "any" },
+    "start_line_documentation": { "type": ["integer", "null"], "value": "any" },
+    "end_line_documentation": { "type": ["integer", "null"], "value": "any" },
+    "start_line_code": { "type": "integer", "value": "any" },
+    "end_line_code": { "type": "integer", "value": "any" },
+    "methods": { "type": "array", "items": { "$ref": "function" }, "value": "any" }
+  },
+  "function": {
+    "path": { "type": "string", "value": "any" },
+    "symbol_name": { "type": "string", "value": "any" },
+    "enclosing_class": { "type": ["string", "null"], "value": "any" },
+    "signature": { "type": "string", "value": "any" },
+    "docstring": { "type": ["string", "null"], "value": "any" },
+    "start_line_documentation": { "type": ["integer", "null"], "value": "any" },
+    "end_line_documentation": { "type": ["integer", "null"], "value": "any" },
+    "start_line_code": { "type": "integer", "value": "any" },
+    "end_line_code": { "type": "integer", "value": "any" }
+  }
+}

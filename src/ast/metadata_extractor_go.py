@@ -20,27 +20,28 @@ class MetadataExtractorGo:
 
         comments = self._collect_comment_nodes(root)
 
-        # classes (Go 'type' with 'struct')
+        # --- classes: structs + interfaces ---
         classes: List[Dict] = []
         for decl in self._find_nodes(root, {"type_declaration"}):
             specs = [c for c in decl.children if c.type == "type_spec"]
             for spec in specs:
                 type_node = spec.child_by_field_name("type")
-                if type_node and type_node.type == "struct_type":
+                if type_node and type_node.type in ("struct_type", "interface_type"):
                     name = self._decode(src, spec.child_by_field_name("name"))
                     doc, sdoc, edoc = self._leading_docstring(src, comments, spec)
-                    classes.append({
-                        "path": rel_path,
-                        "symbol_name": name,
-                        "docstring": doc,
-                        "start_line_documentation": sdoc,
-                        "end_line_documentation": edoc,
-                        "start_line_code": spec.start_point[0] + 1,
-                        "end_line_code": spec.end_point[0] + 1,
-                        "methods": []
-                    })
+                    if spec.start_point and spec.end_point:  # only if tree-sitter gave positions
+                        classes.append({
+                            "path": rel_path,
+                            "symbol_name": name,
+                            "docstring": doc,
+                            "start_line_documentation": sdoc,
+                            "end_line_documentation": edoc,
+                            "start_line_code": spec.start_point[0] + 1,
+                            "end_line_code": spec.end_point[0] + 1,
+                            "methods": []
+                        })
 
-        # free functions (function_declaration)
+        # --- free functions ---
         functions: List[Dict] = []
         for node in self._find_nodes(root, {"function_declaration"}):
             name = self._decode(src, node.child_by_field_name("name"))
@@ -60,7 +61,45 @@ class MetadataExtractorGo:
                 "end_line_code": node.end_point[0] + 1
             })
 
-        # methods (method_declaration) -> attach to classes only (do not duplicate in functions)
+        # --- anonymous functions (func_literal) ---
+        for node in self._find_nodes(root, {"func_literal"}):
+            name = f"anonymous@line{node.start_point[0] + 1}"
+            params = self._decode(src, node.child_by_field_name("parameters"))
+            result = self._decode(src, node.child_by_field_name("result"))
+            signature = self._build_func_signature(name, params, result)
+            doc, sdoc, edoc = self._leading_docstring(src, comments, node)
+            functions.append({
+                "path": rel_path,
+                "symbol_name": name,
+                "enclosing_class": None,
+                "signature": signature,
+                "docstring": doc,
+                "start_line_documentation": sdoc,
+                "end_line_documentation": edoc,
+                "start_line_code": node.start_point[0] + 1,
+                "end_line_code": node.end_point[0] + 1,
+                "is_anonymous": True
+            })
+
+        # --- constants / variables ---
+        for node in self._find_nodes(root, {"const_declaration", "var_declaration"}):
+            text = self._decode(src, node).strip()
+            first_line = text.splitlines()[0] if text else "const"
+            name = f"const@line{node.start_point[0] + 1}"
+            functions.append({
+                "path": rel_path,
+                "symbol_name": name,
+                "enclosing_class": None,
+                "signature": first_line,
+                "docstring": None,
+                "start_line_documentation": None,
+                "end_line_documentation": None,
+                "start_line_code": node.start_point[0] + 1,
+                "end_line_code": node.end_point[0] + 1,
+                "is_constant": True
+            })
+
+        # --- methods ---
         for node in self._find_nodes(root, {"method_declaration"}):
             name = self._decode(src, node.child_by_field_name("name"))
             recv = self._decode(src, node.child_by_field_name("receiver"))
@@ -80,14 +119,12 @@ class MetadataExtractorGo:
                 "start_line_code": node.start_point[0] + 1,
                 "end_line_code": node.end_point[0] + 1
             }
-            # attach to matching class
             attached = False
             for cls in classes:
                 if cls["symbol_name"] == recv_type:
                     cls["methods"].append(method_entry)
                     attached = True
                     break
-            # if class wasn't found, create a placeholder class to hold the method
             if not attached and recv_type:
                 placeholder = {
                     "path": rel_path,
@@ -95,13 +132,13 @@ class MetadataExtractorGo:
                     "docstring": "",
                     "start_line_documentation": None,
                     "end_line_documentation": None,
-                    "start_line_code": None,
-                    "end_line_code": None,
+                    "start_line_code": node.start_point[0] + 1,
+                    "end_line_code": node.end_point[0] + 1,
                     "methods": [method_entry]
                 }
                 classes.append(placeholder)
 
-        # imports extraction (handles single and grouped imports)
+        # --- imports ---
         imports: Optional[List[str]] = None
         imported = []
         for m in re.finditer(r'(?m)^\s*import\s+(?:\((?P<group>[\s\S]*?)\)|(?P<single>"[^"]+"|`[^`]+`|[\w\.\/]+))', src_text):
@@ -137,6 +174,8 @@ class MetadataExtractorGo:
             "functions": functions if functions else None
         }
         return global_meta
+
+
 
     # ---------------- helpers ----------------
     @staticmethod

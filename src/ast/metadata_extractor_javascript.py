@@ -98,6 +98,29 @@ class MetadataExtractorJS:
                     "end_line_code": node.end_point[0] + 1
                 })
 
+        # constants / variables (non-functions, e.g. dbSchema, config objects)
+        for node in self._find_nodes(root, {"variable_declarator"}):
+            init = node.child_by_field_name("value") or node.child_by_field_name("initializer")
+            if init and init.type not in {"arrow_function", "function"}:
+                id_node = node.child_by_field_name("name") or node.child_by_field_name("identifier")
+                name = self._decode(src, id_node)
+                text = self._decode(src, node).strip()
+                first_line = text.splitlines()[0] if text else "var"
+                doc, sdoc, edoc = self._leading_docstring(src, comments, node)
+                functions.append({
+                    "path": rel_path,
+                    "symbol_name": name or f"const@line{node.start_point[0] + 1}",
+                    "enclosing_class": None,
+                    "signature": first_line,
+                    "docstring": doc,
+                    "start_line_documentation": sdoc,
+                    "end_line_documentation": edoc,
+                    "start_line_code": node.start_point[0] + 1,
+                    "end_line_code": node.end_point[0] + 1,
+                    "is_constant": True
+                })
+
+
         # imports: ESM import and require()
         imports = []
         for m in re.finditer(r'(?m)^\s*import\s+(?:.+?\s+from\s+)?[\'"]([^\'"]+)[\'"]', src_text):

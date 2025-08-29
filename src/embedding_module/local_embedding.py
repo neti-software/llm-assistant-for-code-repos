@@ -39,6 +39,8 @@ class LocalEmbedding(EmbeddingABC):
             kwargs["cache_dir"] = cache_dir
         if max_length is not None:
             kwargs["max_length"] = max_length
+        if self.device =="cuda:0": # TODO make it better
+            kwargs["cuda"] = True
 
         self.model = TextEmbedding(**kwargs)
         self.dim_size = self.model.embedding_size

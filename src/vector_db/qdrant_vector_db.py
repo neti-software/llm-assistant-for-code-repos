@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Optional, Sequence, Union, Any
 import uuid
+from tqdm import tqdm
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -47,7 +48,7 @@ class QdrantVectorDB:
 
         self.qdrant_client = QdrantClient(
             url=connection_cfg["host_url"],
-            timeout=5
+            timeout=10
         )
         # self.collection_name = connection_cfg["collection_name"]
 
@@ -56,6 +57,8 @@ class QdrantVectorDB:
 
         # Distance metric
         self.distance_metric = self._DISTANCE_MAP[collection_cfg["distance_metric"]]
+
+        self.upsert_batch_size = collection_cfg["upsert_batch_size"]
 
     # ------------- public API -------------
     @execution_profiler
@@ -124,12 +127,14 @@ class QdrantVectorDB:
         # Prepare data
         points = self._build_points(documents, embedding_keys, vectors_config)
 
-        # Upsert
+        # Upsert in batches of 100 with progress bar
         if points:
-            self.qdrant_client.upsert(
-                collection_name=self.collection_name,
-                points=points,
-            )
+            for i in tqdm(range(0, len(points), self.upsert_batch_size), desc="Upserting to Qdrant"):
+                batch = points[i:i + self.upsert_batch_size]
+                self.qdrant_client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch,
+                )
 
         # Create indexes
         if create_payload_indexes:
@@ -208,7 +213,6 @@ class QdrantVectorDB:
                         "path": metadata['path'],
                         "file_ext": metadata['file_ext'],
                         "language": metadata['language'],
-                        "symbol_kind": metadata['symbol_kind'],
                         "doc_kind": metadata["doc_kind"],
                         "metadata": metadata  # full 20-30 fields
                     },

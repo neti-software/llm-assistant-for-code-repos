@@ -21,9 +21,19 @@ class MetadataExtractorRust:
         comments = self._collect_comment_nodes(root)
 
         classes: List[Dict] = []
-        # collect struct declarations
-        for node in self._find_nodes(root, {"struct_item"}):
-            name = self._decode(src, node.child_by_field_name("name"))
+        for node in self._find_nodes(root, {"struct_item", "enum_item", "impl_item"}):
+            if node.type == "impl_item":
+                # get the type being implemented
+                type_node = node.child_by_field_name("type")
+                name = self._decode(src, type_node).strip() if type_node else None
+                if not name:
+                    continue
+            else:
+                # struct or enum
+                name = self._decode(src, node.child_by_field_name("name"))
+                if not name:
+                    continue
+
             doc, sdoc, edoc = self._leading_docstring(src, comments, node)
             classes.append({
                 "path": rel_path,
@@ -57,6 +67,39 @@ class MetadataExtractorRust:
                 "start_line_code": node.start_point[0] + 1,
                 "end_line_code": node.end_point[0] + 1
             })
+
+        # def dump_tree(root, src, depth=0):
+        #     indent = "  " * depth
+        #     print(
+        #         f"{indent}{root.type} [{root.start_point}–{root.end_point}] → {src[root.start_byte:root.end_byte].decode('utf-8', 'ignore')[:40]}")
+        #     for i in range(root.child_count):
+        #         dump_tree(root.children[i], src, depth + 1)
+        #
+        # # usage
+        # tree = self.parser.parse(src)
+        # dump_tree(tree.root_node, src)
+
+
+        # --- foreign (extern "C") functions ---
+        for extern in self._find_nodes(root, {"foreign_mod_item"}):
+            for node in self._find_nodes(extern, {"function_signature_item"}):
+                name = self._decode(src, node.child_by_field_name("name"))
+                params = self._decode(src, node.child_by_field_name("parameters"))
+                result = self._decode(src, node.child_by_field_name("return_type"))
+                sig = self._build_fn_signature(name, params, result)
+                doc, sdoc, edoc = self._leading_docstring(src, comments, node)
+                functions.append({
+                    "path": rel_path,
+                    "symbol_name": name or f"extern@line{node.start_point[0] + 1}",
+                    "enclosing_class": None,
+                    "signature": sig,
+                    "docstring": doc,
+                    "start_line_documentation": sdoc,
+                    "end_line_documentation": edoc,
+                    "start_line_code": node.start_point[0] + 1,
+                    "end_line_code": node.end_point[0] + 1,
+                    "is_extern": True
+                })
 
         # collect methods inside impl_item and attach to classes (do NOT add them to top-level functions)
         for impl in self._find_nodes(root, {"impl_item"}):

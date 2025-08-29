@@ -12,7 +12,7 @@ from colorama import Fore, Style, init
 # Initialize colorama
 init(autoreset=True)
 
-def foo_minimalize_rag_results(res, full_mode: bool = True):
+def foo_minimalize_rag_results(res, full_mode: bool = False):
     formated_results = []
     for r in res:
         formated_dcit= {}
@@ -30,6 +30,8 @@ def foo_minimalize_rag_results(res, full_mode: bool = True):
 
 
 def chat_loop(llm, tool_manager, conversation_history):
+    print(f"{Fore.BLUE}USER QUESTION:{Style.RESET_ALL} {conversation_history.history['user_question']}\n")
+
     iteration = 0
     while True:
         # --- Iteration Header ---
@@ -67,21 +69,26 @@ def chat_loop(llm, tool_manager, conversation_history):
 llm_config = load_yaml("configs/llm_config.yaml")
 embedding_config = load_yaml("configs/embedding_config.yaml")
 qdrant_config = load_yaml("configs/qdrant_config.yaml")
-conversation_history_config = load_yaml("configs/conversation_history.yaml")
+conversation_history_config = load_yaml("configs/conversation_history_config.yaml")
+repo_metadata_manager_config = load_yaml("configs/json_schema/ast/metadata_schema.json")
 
 llm = CloudLLM(llm_config)
 
-manager_qdrant_vector_db = ManagerQdrantVectorDb(config=qdrant_config, embedding_config=embedding_config)
+manager_qdrant_vector_db = ManagerQdrantVectorDb(config=qdrant_config,
+                                                 embedding_config=embedding_config,
+                                                 repo_metadata_manager_config=repo_metadata_manager_config)
 
 # For first time only. Use 'docker run -p 6333:6333 qdrant/qdrant'
+# manager_qdrant_vector_db.delete_db()
 # manager_qdrant_vector_db.create_vector_db_from_dir("DATA_TO_TEST")
 
-question_to_test = load_json('json_question_to_test.json')["9"]
+question_to_test = load_json('json_question_to_test.json')["12"]
 conversation_history = ConversationHistory(conversation_history_config, question_to_test)
 
 tool_manager = ToolManager()
 tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
-# xx = manager_qdrant_vector_db.search(question_to_test)
+xx = manager_qdrant_vector_db.search(question_to_test)
 # y = foo_minimalize_rag_results(xx)
 
 chat_loop(llm, tool_manager, conversation_history)
+

@@ -5,7 +5,7 @@ import requests
 import glob
 import os
 from heapq import nlargest
-from src.ast.repo_metadata_manager import MetadataExtractorManager
+from src.ast.metadata_extractor_manager import MetadataExtractorManager
 from src.vector_db.helpers_vector_db import *
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 from src.vector_db.qdrant_vector_db import QdrantVectorDB
@@ -13,11 +13,11 @@ from src.utils.profiler import execution_profiler
 
 
 class ManagerQdrantVectorDb:
-    def __init__(self, config: Dict[str, Any], embedding_config: dict):
+    def __init__(self, config: Dict[str, Any], embedding_config: dict, repo_metadata_manager_config: dict):
         self.config = config
         self.embedding_model = EmbeddingBuilder(embedding_config)
 
-        self.metadata_extractor_manager = MetadataExtractorManager()
+        self.metadata_extractor_manager = MetadataExtractorManager(repo_metadata_manager_config)
 
         # Parse connection settings
         self.host_url: str = config["connection"]["host_url"]
@@ -88,6 +88,12 @@ class ManagerQdrantVectorDb:
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
             docs = assemble_function_docs_generic(metadata_map, repo_root=repo_root)
             self._qdrant_vector_db.collection_name = repo_root.name
+            if not docs:
+                print(docs)
+                print(repo_root)
+                print(metadata_map) # TODO
+
+                return
             self._qdrant_vector_db.create_collection_with_data(docs,
                                                                overwrite_existing=True)  # TODO overwrite_existing?
 

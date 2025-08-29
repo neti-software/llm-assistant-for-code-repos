@@ -1,444 +1,301 @@
+import re
 from pathlib import Path
+from typing import List, Dict, Optional
 from tree_sitter_languages import get_parser
-from src.utils.profiler import execution_profiler
 
 
-class MetadataExtractor:
+class MetadataExtractorPython:
     def __init__(self):
-        pass
+        self.parser = get_parser("python")
 
-    @execution_profiler
-    def extract(self, file_path, repo_root=None):
-        source_code = Path(file_path).read_bytes()
-        language = self._detect_language(file_path)
-        parser = get_parser(language)  # dynamic parser selection
-        tree = parser.parse(source_code)
-        root_node = tree.root_node
+    def extract(self, file_path: str, repo_root: Optional[str] = None) -> Dict:
+        p = Path(file_path)
+        src = p.read_bytes()
+        src_text = src.decode("utf-8", errors="ignore")
+        tree = self.parser.parse(src)
+        root = tree.root_node
 
         repo_name = Path(repo_root).name if repo_root else ""
-        rel_path = Path(file_path).relative_to(repo_root).as_posix() if repo_root else str(file_path)
+        rel_path = p.relative_to(repo_root).as_posix() if repo_root else str(p)
 
-        module_doc, module_doc_start, module_doc_end = self._extract_module_docstring_info(root_node, source_code)
+        comments = self._collect_comment_nodes(root)
 
-        schema = {
+        # classes
+        classes: List[Dict] = []
+        for node in self._find_nodes(root, {"class_definition"}):
+            name = self._node_name(src, node) or ""
+            doc, sdoc, edoc = self._leading_docstring_python(src, node, comments)
+            classes.append({
+                "path": rel_path,
+                "symbol_name": name,
+                "docstring": doc,
+                "start_line_documentation": sdoc,
+                "end_line_documentation": edoc,
+                "start_line_code": node.start_point[0] + 1,
+                "end_line_code": node.end_point[0] + 1,
+                "methods": []
+            })
+
+        # functions (free, top-level)
+        functions: List[Dict] = []
+        for node in self._find_nodes(root, {"function_definition"}):
+            # skip methods inside classes (they will be attached)
+            if self._has_ancestor_of_type(node, {"class_definition"}):
+                continue
+            name = self._node_name(src, node) or ""
+            sig = self._build_signature(src, node, language="python")
+            doc, sdoc, edoc = self._leading_docstring_python(src, node, comments)
+            functions.append({
+                "path": rel_path,
+                "symbol_name": name,
+                "enclosing_class": None,
+                "signature": sig,
+                "docstring": doc,
+                "start_line_documentation": sdoc,
+                "end_line_documentation": edoc,
+                "start_line_code": node.start_point[0] + 1,
+                "end_line_code": node.end_point[0] + 1
+            })
+
+        # methods: attach function_definition nodes that are inside class_definition
+        for node in self._find_nodes(root, {"function_definition"}):
+            cls_node = self._find_ancestor(node, {"class_definition"})
+            if not cls_node:
+                continue
+            name = self._node_name(src, node) or ""
+            sig = self._build_signature(src, node, language="python")
+            doc, sdoc, edoc = self._leading_docstring_python(src, node, comments)
+            cls_name = self._node_name(src, cls_node) or ""
+            method_entry = {
+                "path": rel_path,
+                "symbol_name": name,
+                "enclosing_class": cls_name,
+                "signature": sig,
+                "docstring": doc,
+                "start_line_documentation": sdoc,
+                "end_line_documentation": edoc,
+                "start_line_code": node.start_point[0] + 1,
+                "end_line_code": node.end_point[0] + 1
+            }
+            attached = False
+            for cls in classes:
+                if cls["symbol_name"] == cls_name:
+                    cls["methods"].append(method_entry)
+                    attached = True
+                    break
+            if not attached and cls_name:
+                classes.append({
+                    "path": rel_path,
+                    "symbol_name": cls_name,
+                    "docstring": "",
+                    "start_line_documentation": None,
+                    "end_line_documentation": None,
+                    "start_line_code": cls_node.start_point[0] + 1,
+                    "end_line_code": cls_node.end_point[0] + 1,
+                    "methods": [method_entry]
+                })
+
+        # imports
+        imports = []
+        for m in re.finditer(r"(?m)^\s*(?:from\s+([^\s]+)\s+import|import\s+([^\s,]+))", src_text):
+            pkg = m.group(1) or m.group(2)
+            if pkg:
+                imports.append(pkg.strip())
+        imports = list(dict.fromkeys(imports)) if imports else None
+
+        module_doc_end = self._module_docstring_end(src_text)
+
+        global_meta = {
             "repo": repo_name,
             "path": rel_path,
-            "file_ext": Path(file_path).suffix,
-            "language": language,
+            "file_ext": ".py",
+            "language": "python",
             "namespace": "",
             "doc_kind": "code",
-            "module_docstring": module_doc,
-            "module_docstring_start": module_doc_start,
             "module_docstring_end": module_doc_end,
-            "exports": [],
-            "imports": self._extract_imports(root_node, source_code),
-            "variables": self._extract_variables(root_node, source_code),
-            "constants": self._extract_constants(root_node, source_code),
-            "classes": self._extract_classes(root_node, source_code),
-            "functions": self._extract_functions(root_node, source_code)
+            "imports": imports,
+            "classes": classes if classes else None,
+            "functions": functions if functions else None
         }
-        return schema
+        return global_meta
 
-    def _detect_language(self, file_path):
-        return self._SUPPORTED_EXTENSIONS.get(Path(file_path).suffix.lower(), "unknown")
-
-    # ---------------- HELPER EXTRACTORS ----------------
+    # ---------- helpers ----------
     @staticmethod
-    def _decode(source_code, node):
-        return source_code[node.start_byte:node.end_byte].decode("utf-8") if node else ""
-
-    @staticmethod
-    def _is_async(node):
-        return any(child.type == "async" for child in node.children)
-
-    def _extract_bases(self, node, source_code):
-        bases_node = node.child_by_field_name("superclasses")
-        if not bases_node:
-            return []
-        return [self._decode(source_code, child)
-                for child in bases_node.children if child.type != ","]
-
-    def _extract_decorators(self, node, source_code):
-        decorators = []
-        for child in node.children:
-            if child.type == "decorator":
-                decorators.append(self._decode(source_code, child))
-        return decorators
-
-    def _extract_parameters(self, node, source_code):
-        params_node = node.child_by_field_name("parameters")
-        params = []
-        if not params_node:
-            return params
-        for child in params_node.children:
-            if child.type in ("identifier", "typed_parameter", "default_parameter"):
-                params.append(self._decode(source_code, child))
-        return params
-
-    def _extract_return_annotation(self, node, source_code):
-        ret_node = node.child_by_field_name("return_type")
-        return self._decode(source_code, ret_node) if ret_node else None
+    def _decode(src: bytes, node) -> str:
+        try:
+            return src[node.start_byte:node.end_byte].decode("utf-8", errors="ignore") if node else ""
+        except Exception:
+            return ""
 
     @staticmethod
-    def _has_type_annotations(params, return_annotation):
-        return bool(return_annotation) or any(":" in p for p in params)
-
-    @execution_profiler
-    def _extract_calls(self, node, source_code):
-        calls = []
-        cursor = node.walk()
-        visited = set()
-        while True:
-            n = cursor.node
-            if n.id not in visited:
-                visited.add(n.id)
-                if n.type == "call":
-                    calls.append(
-                        self._decode(source_code, n.child_by_field_name("function")))
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return calls
-
-    def _extract_docstring_info(self, node, source_code):
-        body_node = node.child_by_field_name("body")
-        if body_node and body_node.children:
-            first_stmt = body_node.children[0]
-            if first_stmt.type == "expression_statement" and first_stmt.children and first_stmt.children[
-                0].type == "string":
-                text = self._decode(source_code, first_stmt).strip("\"'")
-                return text, first_stmt.start_point[0] + 1, first_stmt.end_point[0] + 1
-        return None, None, None
-
-    @execution_profiler
-    def _extract_raises(self, node, source_code):
-        raises = []
-        cursor = node.walk()
-        visited = set()
-        while True:
-            n = cursor.node
-            if n.id not in visited:
-                visited.add(n.id)
-                if n.type == "raise_statement":
-                    expr = n.child_by_field_name("exception")
-                    if expr is None and n.children:
-                        expr = n.children[1]  # usually after the 'raise' keyword
-                    if expr:
-                        text = self._decode(source_code, expr)
-                        raises.append(text.strip())
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return raises
-
-    @execution_profiler
-    def _extract_handled_exceptions(self, node, source_code):
-        """
-        Return list of exception types handled in try/except blocks within `node`.
-        Handles:
-          - except ValueError:
-          - except (TypeError, ValueError):
-          - bare `except:`  -> recorded as "Exception"
-        """
-        handled = []
-        cursor = node.walk()
+    def _find_nodes(root, kinds: set):
+        cursor = root.walk()
         seen = set()
         while True:
             n = cursor.node
             if n.id not in seen:
                 seen.add(n.id)
-
-                # In tree-sitter-python, try/except is a `try_statement` with `except_clause` children
-                if n.type == "except_clause":
-                    # preferred: field 'type' holds the exception expression
-                    exc = n.child_by_field_name("type")
-                    if exc:
-                        handled.append(self._decode(source_code, exc))
-                    else:
-                        # bare `except:`
-                        handled.append("Exception")
-
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return handled
-
-    # ---------------- HIGHER-LEVEL EXTRACTIONS ----------------
-    @execution_profiler
-    def _extract_classes(self, root_node, source_code):
-        classes = []
-        cursor = root_node.walk()
-        visited = set()
-        while True:
-            n = cursor.node
-            if n.id not in visited:
-                visited.add(n.id)
-                if n.type == "class_definition":
-                    name = self._decode(source_code, n.child_by_field_name("name"))
-                    doc, doc_start, doc_end = self._extract_docstring_info(n, source_code)
-                    bases = self._extract_bases(n, source_code)
-                    decorators = self._extract_decorators(n, source_code)
-
-                    # Methods inside
-                    methods = self._extract_functions(n, source_code, enclosing_class=name)
-
-                    classes.append({
-                        "symbol_name": name,
-                        "symbol_kind": "class",
-                        "ast_path": f"class[{name}]",
-                        "start_line_doc": doc_start,
-                        "end_line_doc": doc_end,
-                        "start_line_code": n.start_point[0] + 1,
-                        "end_line_code": n.end_point[0] + 1,
-                        "bases": bases,
-                        "decorators": decorators,
-                        "docstring": doc,
-                        "has_type_annotations": any(m["has_type_annotations"] for m in methods),
-                        "methods": methods,
-                        "class_variables": self._extract_class_variables(source_code, n)
-                    })
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return classes
-
-    @execution_profiler
-    def _extract_class_variables(self, source_code, class_node):
-        class_vars = []
-        body_node = class_node.child_by_field_name("body")
-
-        if not body_node:
-            return class_vars
-
-        for child in body_node.children:
-            node_type = child.type
-
-            # --- 1. Class-level assignments ---
-            if node_type == "expression_statement" and child.child_count > 0:
-                child = child.children[0]
-                node_type = child.type
-
-            if node_type in ("assignment", "typed_assignment"):
-                target_node = (
-                        child.child_by_field_name("left")
-                        or child.child_by_field_name("name")
-                        or child.child_by_field_name("target")
-                )
-                if target_node:
-                    var_name = self._decode(source_code, target_node)
-                    class_vars.append(var_name)
-
-            # --- 2. Instance variables in methods ---
-            if node_type == "function_definition":
-                func_body = child.child_by_field_name("body")
-                if func_body:
-                    cursor = func_body.walk()
-                    visited = set()
-                    while True:
-                        node = cursor.node
-                        if node.id not in visited:
-                            visited.add(node.id)
-                            if node.type == "attribute":
-                                obj_node = node.child_by_field_name("object")
-                                if obj_node and self._decode(source_code, obj_node) == "self":
-                                    attr_node = node.child_by_field_name("attribute")
-                                    if attr_node:
-                                        var_name = self._decode(source_code, attr_node)
-                                        if var_name not in class_vars:
-                                            class_vars.append(var_name)
-
-                        # Standard tree-sitter traversal pattern
-                        if cursor.goto_first_child():
-                            continue
-                        while not cursor.goto_next_sibling():
-                            if not cursor.goto_parent():
-                                # exit this walk loop
-                                break
-                        else:
-                            continue
-                        break  # break outer while True
-
-        return class_vars
-
-    @execution_profiler
-    def _extract_functions(self, root_node, source_code, enclosing_class=None):
-        funcs = []
-        cursor = root_node.walk()
-        visited = set()
-        while True:
-            n = cursor.node
-            if n.id not in visited:
-                visited.add(n.id)
-                if n.type in ("function_definition", "method_definition"):
-                    name = self._decode(source_code, n.child_by_field_name("name"))
-                    params = self._extract_parameters(n, source_code)
-                    ret_ann = self._extract_return_annotation(n, source_code)
-                    doc, doc_start, doc_end = self._extract_docstring_info(n, source_code)
-                    calls = self._extract_calls(n, source_code)
-                    raises = self._extract_raises(n, source_code)
-                    decorators = self._extract_decorators(n, source_code)
-                    funcs.append({
-                        "symbol_name": name,
-                        "symbol_kind": "function",
-                        "enclosing_class": enclosing_class,
-                        "ast_path": (f"class[{enclosing_class}]." if enclosing_class else "") + f"function[{name}]",
-                        "signature": f"{name}({', '.join(params)})",
-                        "parameters_detail": params,
-                        "return_annotation": ret_ann,
-                        "decorators": decorators,
-                        "is_async": self._is_async(n),
-                        "docstring": doc,
-                        "start_line_doc": doc_start,
-                        "end_line_doc": doc_end,
-                        "start_line_code": n.start_point[0] + 1,
-                        "end_line_code": n.end_point[0] + 1,
-                        "calls": calls,
-                        "handles": self._extract_handled_exceptions(n, source_code),
-                        "raises": raises,
-                        "has_type_annotations": self._has_type_annotations(params, ret_ann)
-                    })
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return funcs
-
-    @execution_profiler
-    def _extract_imports(self, root_node, source_code):
-        # Simplified for Python
-        imports = []
-        cursor = root_node.walk()
-        visited = set()
-        while True:
-            n = cursor.node
-            if n.id not in visited:
-                visited.add(n.id)
-                if n.type in ("import_statement", "import_from_statement"):
-                    imports.append(self._decode(source_code, n))
-            if cursor.goto_first_child():
-                continue
-            while not cursor.goto_next_sibling():
-                if not cursor.goto_parent():
-                    return imports
-
-    @execution_profiler
-    def _extract_module_docstring_info(self, root_node, source_code):
-        """
-        Returns (docstring_text, start_line, end_line) for module-level docstring.
-        If no docstring at the top of the file, returns (None, None, None).
-        """
-        # A module docstring is usually the very first statement in the file
-        if root_node and root_node.children:
-            first_stmt = root_node.children[0]
-            if first_stmt.type == "expression_statement" and first_stmt.children and first_stmt.children[
-                0].type == "string":
-                text = self._decode(source_code, first_stmt).strip("\"'")
-                return text, first_stmt.start_point[0] + 1, first_stmt.end_point[0] + 1
-        return None, None, None
-
-    # ----------- utils for previews -----------
-    # ---------- robust "is top-level" check (not inside functions/classes) ----------
-    @staticmethod
-    def _is_module_level(node) -> bool:
-        p = node.parent
-        while p is not None:
-            if p.type in ("function_definition", "class_definition"):
-                return False
-            p = p.parent
-        return True
-
-    # ---------- collect identifiers that belong to the LHS (before RHS start) ----------
-    def _collect_identifiers_before(self, node, byte_cutoff: int):
-        """Yield identifier nodes under `node` whose end_byte <= byte_cutoff."""
-        stack = [node]
-        while stack:
-            cur = stack.pop()
-            if cur.type == "identifier" and cur.end_byte <= byte_cutoff:
-                yield cur
-            stack.extend(cur.children)
-
-    # ---------- iterate module-level assignments, return (name, assign_node, rhs_node) ----------
-    @execution_profiler
-    def _iter_module_assignments(self, root_node):
-        """
-        Finds module-level assignments:
-          - 'assignment' (x = ...)
-          - 'annotated_assignment' (x: T = ... or x: T)
-          - (optionally) 'augmented_assignment' if you want, but usually not needed for definitions
-        We consider them module-level if they're NOT nested inside a function/class.
-        """
-        cursor = root_node.walk()
-        seen = set()
-        while True:
-            n = cursor.node
-            if n.id not in seen:
-                seen.add(n.id)
-                if n.type in ("assignment", "annotated_assignment"):  # add 'augmented_assignment' if desired
-                    if self._is_module_level(n):
-                        # Find RHS node (value), if any
-                        rhs = (n.child_by_field_name("right")
-                               or n.child_by_field_name("value")
-                               or (n.children[-1] if n.children else None))
-                        rhs_start = rhs.start_byte if rhs else n.end_byte
-                        # Collect LHS identifiers (anything before RHS start)
-                        for name_node in self._collect_identifiers_before(n, rhs_start):
-                            yield name_node.text.decode("utf-8"), n, rhs
+                if n.type in kinds:
+                    yield n
             if cursor.goto_first_child():
                 continue
             while not cursor.goto_next_sibling():
                 if not cursor.goto_parent():
                     return
 
-    # ---------- helpers for preview ----------
-    def _node_text(self, source_code: bytes, node) -> str:
-        return source_code[node.start_byte:node.end_byte].decode("utf-8") if node else ""
+    def _collect_comment_nodes(self, root):
+        nodes = []
+        cursor = root.walk()
+        seen = set()
+        while True:
+            n = cursor.node
+            if n.id not in seen:
+                seen.add(n.id)
+                if n.type in {"comment", "line_comment"}:
+                    nodes.append(n)
+            if cursor.goto_first_child():
+                continue
+            while not cursor.goto_next_sibling():
+                if not cursor.goto_parent():
+                    break
+            else:
+                continue
+            break
+        return nodes
+
+    def _leading_docstring_python(self, src: bytes, node, comments: List) -> (Optional[str], Optional[int], Optional[int]):
+        """
+        Prefer a leading string literal inside the node (Python docstring).
+        Fallback to an adjacent comment block directly above the node.
+        """
+        # 1) leading string literal inside body (common Python docstring)
+        # check immediate block/suite/body children for a string literal as first statement
+        for child in node.children:
+            if child.type in {"block", "suite", "block_statement", "block"}:
+                if child.children:
+                    first = child.children[0]
+                    # string literal node names vary: "string", "string_literal"
+                    if first.type in {"string", "string_literal"}:
+                        txt = self._decode(src, first)
+                        cleaned = self._strip_string_quotes(txt)
+                        if cleaned:
+                            return cleaned, first.start_point[0] + 1, first.end_point[0] + 1
+                    # sometimes expression_statement wraps the string
+                    if first.type == "expression_statement" and first.children:
+                        leaf = first.children[0]
+                        if leaf.type in {"string", "string_literal"}:
+                            txt = self._decode(src, leaf)
+                            cleaned = self._strip_string_quotes(txt)
+                            if cleaned:
+                                return cleaned, leaf.start_point[0] + 1, leaf.end_point[0] + 1
+
+        # 2) adjacent comments above node (within 2 lines)
+        t_start_line = node.start_point[0]
+        close = [c for c in comments if c.end_point[0] >= t_start_line - 2 and c.end_point[0] < t_start_line]
+        if not close:
+            return None, None, None
+        close = sorted([c for c in close if c.end_byte <= node.start_byte], key=lambda n: n.start_byte)
+        block = []
+        last_line = None
+        for c in reversed(close):
+            if last_line is None or c.end_point[0] >= last_line - 1:
+                block.append(c)
+                last_line = c.start_point[0]
+            else:
+                break
+        if not block:
+            return None, None, None
+        block = list(reversed(block))
+        raw = "\n".join(self._decode(src, c) for c in block)
+        clean = self._clean_comment_text(raw)
+        start_line = block[0].start_point[0] + 1
+        end_line = block[-1].end_point[0] + 1
+        return clean, start_line, end_line
 
     @staticmethod
-    def _preview_text(s: str, limit: int = 60) -> str:
-        s = " ".join(s.strip().split())
-        return s if len(s) <= limit else s[: limit - 1] + "…"
+    def _strip_string_quotes(s: str) -> str:
+        s = s.strip()
+        if (s.startswith('"""') and s.endswith('"""')) or (s.startswith("'''") and s.endswith("'''")):
+            return s[3:-3].strip()
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            return s[1:-1].strip()
+        return s
 
-    # ---------- the two extractors (rich dicts) ----------
-    @execution_profiler
-    def _extract_variables(self, root_node, source_code):
-        """
-        Module-level variables (non-ALL_CAPS).
-        Returns list[{"name","line","value_preview"}] unique in source order.
-        """
-        out, seen = [], set()
-        for name, assign_node, rhs in self._iter_module_assignments(root_node):
-            is_const = name.upper() == name and any(c.isalpha() for c in name)
-            if is_const or name in seen:
-                continue
-            seen.add(name)
-            preview = self._preview_text(self._node_text(source_code, rhs)) if rhs else None
-            out.append({
-                "name": name,
-                "line": assign_node.start_point[0] + 1,
-                "value_preview": preview,
-            })
-        return out
+    def _node_name(self, src: bytes, node) -> str:
+        # try typical field names then fallback to identifier child
+        try:
+            n = node.child_by_field_name("name")
+            if n:
+                return self._decode(src, n)
+        except Exception:
+            pass
+        for ch in node.children:
+            if ch.type in {"identifier", "name"}:
+                return self._decode(src, ch)
+        return ""
 
-    @execution_profiler
-    def _extract_constants(self, root_node, source_code):
-        """
-        Module-level constants (ALL_CAPS per Python convention).
-        Returns list[{"name","line","value_preview"}] unique in source order.
-        """
-        out, seen = [], set()
-        for name, assign_node, rhs in self._iter_module_assignments(root_node):
-            is_const = name.upper() == name and any(c.isalpha() for c in name)
-            if not is_const or name in seen:
+    @staticmethod
+    def _has_ancestor_of_type(node, types) -> bool:
+        if isinstance(types, (list, set)):
+            target = set(types)
+        else:
+            target = {types}
+        cur = node.parent
+        while cur is not None:
+            if cur.type in target:
+                return True
+            cur = cur.parent
+        return False
+
+    def _find_ancestor(self, node, kinds: set):
+        cur = node.parent
+        while cur is not None:
+            if cur.type in kinds:
+                return cur
+            cur = cur.parent
+        return None
+
+    @staticmethod
+    def _clean_comment_text(s: str) -> str:
+        s = re.sub(r"(?m)^\s*#\s?", "", s)
+        s = re.sub(r"(?m)^\s*\"\"\"\s?", "", s)
+        s = re.sub(r"(?m)^\s*'''\s?", "", s)
+        s = re.sub(r"(?m)^\s*\"\"\"", "", s)
+        return s.strip()
+
+    @staticmethod
+    def _build_signature(src: bytes, node, language: str = "python") -> str:
+        name = ""
+        try:
+            name = node.child_by_field_name("name") and src[node.child_by_field_name("name").start_byte:node.child_by_field_name("name").end_byte].decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+        params = ""
+        try:
+            p = node.child_by_field_name("parameters") or node.child_by_field_name("parameter_list")
+            params = src[p.start_byte:p.end_byte].decode("utf-8", errors="ignore") if p else ""
+        except Exception:
+            params = ""
+        if language == "python":
+            return f"def {name}{params}".strip()
+        return f"{name}{params}".strip()
+
+    @staticmethod
+    def _module_docstring_end(src_text: str) -> Optional[int]:
+        lines = src_text.splitlines()
+        end = None
+        started = False
+        for i, line in enumerate(lines):
+            if re.match(r"^\s*(#|\"\"\"|''')", line):
+                started = True
+                end = i + 1
+            elif started and line.strip() == "":
+                end = i + 1
                 continue
-            seen.add(name)
-            preview = self._preview_text(self._node_text(source_code, rhs)) if rhs else None
-            out.append({
-                "name": name,
-                "line": assign_node.start_point[0] + 1,
-                "value_preview": preview,
-            })
-        return out
+            elif started:
+                break
+            elif not started and line.strip() == "":
+                continue
+            else:
+                break
+        return end
