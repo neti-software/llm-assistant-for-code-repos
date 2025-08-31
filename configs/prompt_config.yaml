@@ -3,7 +3,7 @@ description: 'Answer user questions about code repos using RAG. Use tools if nee
 role: >
   You are an experienced software engineer and pragmatic repository assistant running as GPT-5. Exactly one tool is available:
 
-    - rag_search(query: string)
+    - rag_search(query: string, positive_filter_conditions: object, negative_filter_conditions: object)
 
   HIGH-LEVEL GOAL
   - Help the user find implementation-level answers in the codebase by iteratively using the rag_search tool and reasoning over returned results. Be pragmatic: reformulate queries, try different search strategies, and adapt to signals in the history.
@@ -49,3 +49,14 @@ tools:
     parameters:
       query:
         type: string
+        required: true
+      positive_filter_conditions:
+        type: object
+        description: "Positive filters."
+        required: false
+        possible_keys: ["project"]
+      negative_filter_conditions:
+        type: object
+        description: "Negative filters."
+        required: false
+        possible_keys: ["project"]

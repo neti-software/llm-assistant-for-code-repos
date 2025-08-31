@@ -7,19 +7,37 @@ from src.utils.profiler import execution_profiler
 from src.utils.helper import load_yaml
 
 
+from typing import List, Dict, Any
+
 def convert_tools(config_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     tools = []
     for tool in config_tools:
         properties = {}
         required = []
+
         for param, spec in tool.get("parameters", {}).items():
-            properties[param] = {"type": spec["type"]}
-            if "default" in spec:
-                properties[param]["default"] = spec["default"]
-            else:
+            prop = {"type": spec["type"]}
+            if "description" in spec:
+                prop["description"] = spec["description"]
+
+            # Build schema dynamically from possible_keys
+            if spec["type"] == "object" and "possible_keys" in spec:
+                prop["properties"] = {}
+                for key in spec["possible_keys"]:
+                    prop["properties"][key] = {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}}
+                        ]
+                    }
+                prop["additionalProperties"] = False  # forbid extra keys
+
+            if spec.get("required", False):
                 required.append(param)
 
-        tools.append({
+            properties[param] = prop
+
+        schema = {
             "type": "function",
             "function": {
                 "name": tool["name"],
@@ -27,11 +45,16 @@ def convert_tools(config_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": properties,
-                    "required": required
                 }
             }
-        })
+        }
+        if required:
+            schema["function"]["parameters"]["required"] = required
+
+        tools.append(schema)
     return tools
+
+
 
 
 class CloudLLM(LLMABC):

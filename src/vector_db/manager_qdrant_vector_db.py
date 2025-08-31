@@ -10,6 +10,8 @@ from src.vector_db.helpers_vector_db import *
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 from src.vector_db.qdrant_vector_db import QdrantVectorDB
 from src.utils.profiler import execution_profiler
+from qdrant_client.http import models as rest
+from tqdm import tqdm
 
 
 class ManagerQdrantVectorDb:
@@ -83,7 +85,7 @@ class ManagerQdrantVectorDb:
     @execution_profiler
     def create_vector_db_from_dir(self, root_repos_dir):
         repos_dir = [d for d in glob.glob(os.path.join(root_repos_dir, "*/")) if os.path.isdir(d)]
-        for repo_path in repos_dir:
+        for repo_path in tqdm(map(Path, repos_dir), desc="Processing repos"):
             repo_root = Path(repo_path).resolve()
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
             docs = assemble_function_docs_generic(metadata_map, repo_root=repo_root)
@@ -92,13 +94,15 @@ class ManagerQdrantVectorDb:
                 print(docs)
                 print(repo_root)
                 print(metadata_map) # TODO
+                continue
 
-                return
             self._qdrant_vector_db.create_collection_with_data(docs,
                                                                overwrite_existing=True)  # TODO overwrite_existing?
 
     @execution_profiler
-    def search(self, query: str, top_k: int = 3, per_field: bool = True, filter_conditions: dict = None):
+    def search(self, query: str, top_k: int = 3, per_field: bool = True,
+               positive_filter_conditions: dict = None,
+               negative_filter_conditions: dict = None):
         print(f"\n🔍 Searching for: {query!r}")
 
         # 1) Get all collections
@@ -107,20 +111,43 @@ class ManagerQdrantVectorDb:
             print("⚠️ No collections found in Qdrant.")
             return []
 
-        all_hits = []
+        # # 2) Build filter
+        # must_conditions = self._build_filter_conditions(positive_filter_conditions, positive=True)
+        # must_not_conditions = self._build_filter_conditions(negative_filter_conditions, positive=False)
+        #
+        # qdrant_filter = None
+        # if must_conditions or must_not_conditions:
+        #     qdrant_filter = rest.Filter(
+        #         must=must_conditions["must"] if must_conditions else None,
+        #         must_not=must_not_conditions["must_not"] if must_not_conditions else None,
+        #     )
+        #
 
-        # 2) Loop through collections
-        for collection in collections:
+        filtered_collections = self.filter_collections(collections,
+                                                       positive_filter_conditions=positive_filter_conditions,
+                                                       negative_filter_conditions=negative_filter_conditions)
+
+        all_hits = []
+        # 3) Loop through collections
+        # for collection in collections:
+        #     cname = collection.name
+        #     hits = self._qdrant_vector_db.search_collection(
+        #         collection_name=cname,
+        #         query_text=query,
+        #         top_k=top_k,  # local top_k per collection
+        #         per_field=per_field,
+        #         filter_conditions=qdrant_filter,
+        #     )
+        for collection in filtered_collections:
             cname = collection.name
             hits = self._qdrant_vector_db.search_collection(
                 collection_name=cname,
                 query_text=query,
                 top_k=top_k,  # local top_k per collection
                 per_field=per_field,
-                filter_conditions=filter_conditions,
             )
 
-            # 3) Collect results with metadata
+            # 4) Collect results with metadata
             for field, results in hits.items():
                 for hit in results:
                     score = getattr(hit, "score", None)
@@ -132,15 +159,67 @@ class ManagerQdrantVectorDb:
                         "metadata": hit.payload
                     })
 
-        # 4) Keep only global top_k
+        # 5) Keep only global top_k
         top_results = nlargest(top_k, all_hits, key=lambda x: x["score"] or -1e9)
 
-        # 5) Print nicely
+        # 6) Print nicely
         print(f"\n🏆 Global Top {top_k} Results:")
         for rank, hit in enumerate(top_results, start=1):
             print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={hit['score']:.4f})")
 
         return top_results
 
+    @staticmethod
+    def _build_filter_conditions(conditions: dict, positive: bool = True):
+        """
+        Convert a simple dict {key: value} into Qdrant conditions.
+        Supports scalars and lists.
+        If positive=True → 'must'
+        If positive=False → 'must_not'
+        """
+        if not conditions:
+            return None
+
+        built = []
+        for k, v in conditions.items():
+            if isinstance(v, (list, tuple, set)):
+                cond = rest.FieldCondition(
+                    key=f"metadata.{k}",
+                    match=rest.MatchAny(any=list(v))
+                )
+            else:
+                cond = rest.FieldCondition(
+                    key=f"metadata.{k}",
+                    match=rest.MatchValue(value=v)
+                )
+            built.append(cond)
+
+        return {"must": built} if positive else {"must_not": built}
+
     def delete_db(self):
         self._qdrant_vector_db.erase_database()
+
+    @staticmethod
+    def filter_collections(collections, positive_filter_conditions=None, negative_filter_conditions=None): # TODO make it better
+        """
+        Filter Qdrant collections by project name.
+        - conditions must look like {"project": "ecodash"} or {"project": ["ecodash", "acbc"]}
+        """
+        names = [c.name for c in collections]
+
+        # positive has priority
+        if positive_filter_conditions and "project" in positive_filter_conditions:
+            v = positive_filter_conditions["project"]
+            allowed = {v} if isinstance(v, str) else set(v)
+            filtered = [c for c in collections if c.name in allowed]
+            return filtered
+
+        # else negative
+        if negative_filter_conditions and "project" in negative_filter_conditions:
+            v = negative_filter_conditions["project"]
+            blocked = {v} if isinstance(v, str) else set(v)
+            filtered = [c for c in collections if c.name not in blocked]
+            return filtered
+
+        # no filters
+        return collections
