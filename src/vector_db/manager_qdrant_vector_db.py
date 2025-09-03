@@ -15,11 +15,12 @@ from tqdm import tqdm
 
 
 class ManagerQdrantVectorDb:
-    def __init__(self, config: Dict[str, Any], embedding_config: dict, repo_metadata_manager_config: dict):
+    def __init__(self, config: Dict[str, Any], embedding_config: dict, repo_metadata_manager_config: dict,
+                 ignore_patterns_config: dict):
         self.config = config
         self.embedding_model = EmbeddingBuilder(embedding_config)
 
-        self.metadata_extractor_manager = MetadataExtractorManager(repo_metadata_manager_config)
+        self.metadata_extractor_manager = MetadataExtractorManager(repo_metadata_manager_config, ignore_patterns_config)
 
         # Parse connection settings
         self.host_url: str = config["connection"]["host_url"]
@@ -93,7 +94,7 @@ class ManagerQdrantVectorDb:
             repo_root = Path(repo_path).resolve()
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
             docs = assemble_function_docs_generic(metadata_map, repo_root=repo_root)
-            self._qdrant_vector_db.collection_name = repo_root.name
+            self._qdrant_vector_db.collection_name = repo_root.name # TODO
             if not docs:
                 print(docs)
                 print(repo_root)

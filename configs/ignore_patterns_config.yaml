@@ -1,0 +1,60 @@
+global:
+  - "*.min.js"
+  - "*.bundle.js"
+  - "node_modules/**"
+  - "dist/**"
+  - "build/**"
+  - "out/**"
+  - "*.lock"
+  - "*.log"
+  - "*.tmp"
+  - "*.cache/**"
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.gif"
+  - "*.svg"
+  - "*.ico"
+  - "*.pdf"
+  - "*.zip"
+  - "*.tar"
+  - "*.gz"
+
+python:
+  - "__pycache__/**"
+  - "*.pyc"
+  - "*.pyo"
+  - "*.pyd"
+  - ".mypy_cache/**"
+  - ".pytest_cache/**"
+  - ".venv/**"
+  - "env/**"
+  - "venv/**"
+
+javascript:
+  - "node_modules/**"
+  - "coverage/**"
+  - "*.map"
+  - "jspm_packages/**"
+  - "bower_components/**"
+
+rust:
+  - "target/**"
+  - "Cargo.lock"
+
+go:
+  - "bin/**"
+  - "pkg/**"
+  - "*.exe"
+  - "*.dll"
+  - "*.so"
+  - "*.test"
+  - "go.sum"
+  - "vendor/**"
+
+docs:
+  - "_build/**"
+  - "site/**"
+  - "themes/**/static/*.min.js"
+  - "*.html"
+  - "*.css"

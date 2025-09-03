@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict
+import fnmatch
 from src.utils.profiler import execution_profiler
 from src.ast.metadata_extractor_python import MetadataExtractorPython
 from src.ast.metadata_extractor_go import MetadataExtractorGo
@@ -9,7 +10,7 @@ from src.ast.metadata_validator import MetadataValidator
 
 
 class MetadataExtractorManager:
-    def __init__(self, metadata_schema):
+    def __init__(self, metadata_schema, ignore_patterns_config):
         self.metadata_validator = MetadataValidator(metadata_schema)
 
         # simple extension -> extractor map
@@ -22,6 +23,8 @@ class MetadataExtractorManager:
             ".rs": MetadataExtractorRust(),
         }
 
+        self._ignore_patterns = [p for v in ignore_patterns_config.values() for p in v]
+
     @execution_profiler
     def process_repo(self, repo_path) -> Dict[str, dict]:
         repo_path = Path(repo_path).resolve()
@@ -31,13 +34,19 @@ class MetadataExtractorManager:
             if not file_path.is_file():
                 continue
 
+            rel_path = file_path.relative_to(repo_path).as_posix()
+
+            # --- skip ignored files ---
+            if any(fnmatch.fnmatch(rel_path, pat) for pat in self._ignore_patterns):
+                print(f"SKIP: {rel_path} (matched ignore pattern)")
+                continue
+
             suffix = file_path.suffix.lower()
             extractor = self._extractor_by_ext.get(suffix)
             if extractor is None:
                 # skip unknown extensions
                 continue
 
-            rel_path = file_path.relative_to(repo_path).as_posix()
             try:
                 meta = extractor.extract(str(file_path), repo_root=str(repo_path))
                 # normalize expected fields minimally
