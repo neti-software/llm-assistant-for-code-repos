@@ -85,7 +85,11 @@ class ManagerQdrantVectorDb:
     @execution_profiler
     def create_vector_db_from_dir(self, root_repos_dir):
         repos_dir = [d for d in glob.glob(os.path.join(root_repos_dir, "*/")) if os.path.isdir(d)]
+        cnt = 0
         for repo_path in tqdm(map(Path, repos_dir), desc="Processing repos"):
+            # cnt +=1
+            # if cnt < 110:
+            #     continue
             repo_root = Path(repo_path).resolve()
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
             docs = assemble_function_docs_generic(metadata_map, repo_root=repo_root)
@@ -102,7 +106,8 @@ class ManagerQdrantVectorDb:
     @execution_profiler
     def search(self, query: str, top_k: int = 3, per_field: bool = True,
                positive_filter_conditions: dict = None,
-               negative_filter_conditions: dict = None):
+               negative_filter_conditions: dict = None,
+               diversity: bool = False): # TODO change to number like give at least 3 diversity repo
         print(f"\n🔍 Searching for: {query!r}")
 
         # 1) Get all collections
@@ -111,33 +116,12 @@ class ManagerQdrantVectorDb:
             print("⚠️ No collections found in Qdrant.")
             return []
 
-        # # 2) Build filter
-        # must_conditions = self._build_filter_conditions(positive_filter_conditions, positive=True)
-        # must_not_conditions = self._build_filter_conditions(negative_filter_conditions, positive=False)
-        #
-        # qdrant_filter = None
-        # if must_conditions or must_not_conditions:
-        #     qdrant_filter = rest.Filter(
-        #         must=must_conditions["must"] if must_conditions else None,
-        #         must_not=must_not_conditions["must_not"] if must_not_conditions else None,
-        #     )
-        #
-
-        filtered_collections = self.filter_collections(collections,
-                                                       positive_filter_conditions=positive_filter_conditions,
-                                                       negative_filter_conditions=negative_filter_conditions)
+        filtered_collections = self._filter_collections(collections,
+                                                        positive_filter_conditions=positive_filter_conditions,
+                                                        negative_filter_conditions=negative_filter_conditions)
 
         all_hits = []
         # 3) Loop through collections
-        # for collection in collections:
-        #     cname = collection.name
-        #     hits = self._qdrant_vector_db.search_collection(
-        #         collection_name=cname,
-        #         query_text=query,
-        #         top_k=top_k,  # local top_k per collection
-        #         per_field=per_field,
-        #         filter_conditions=qdrant_filter,
-        #     )
         for collection in filtered_collections:
             cname = collection.name
             hits = self._qdrant_vector_db.search_collection(
@@ -159,15 +143,64 @@ class ManagerQdrantVectorDb:
                         "metadata": hit.payload
                     })
 
-        # 5) Keep only global top_k
-        top_results = nlargest(top_k, all_hits, key=lambda x: x["score"] or -1e9)
+        # 5) Keep only global top_k (with optional diversity)
+        def _score(h):
+            return h["score"] if (h["score"] is not None) else float("-inf")
+
+        sorted_hits = sorted(all_hits, key=_score, reverse=True)
+
+        if not diversity:
+            top_results = sorted_hits[:top_k]
+        else:
+            top_results = []
+            used_collections = set()
+            # 1) pick one top hit per collection
+            for h in sorted_hits:
+                if h["collection"] not in used_collections:
+                    top_results.append(h)
+                    used_collections.add(h["collection"])
+                if len(top_results) == top_k:
+                    break
+            # 2) if not enough distinct collections, fill with highest remaining hits
+            if len(top_results) < top_k:
+                for h in sorted_hits:
+                    if h in top_results:
+                        continue
+                    top_results.append(h)
+                    if len(top_results) == top_k:
+                        break
 
         # 6) Print nicely
         print(f"\n🏆 Global Top {top_k} Results:")
         for rank, hit in enumerate(top_results, start=1):
-            print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={hit['score']:.4f})")
+            sc = hit["score"]
+            sc_txt = f"{sc:.4f}" if sc is not None else "None"
+            print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={sc_txt})")
 
-        return top_results
+        return self._minimalize_rag_results(top_results)
+
+    @staticmethod
+    def _minimalize_rag_results(res, full_mode: bool = False):  # TODO move it, fix that double emtadata
+        formated_results = []
+        for r in res:
+            formated_dcit = {}
+            formated_dcit['project'] = r['metadata']['project']
+            formated_dcit['path_to_file'] = r['metadata']['project'] + "/" + r['metadata']['path']
+            # if full_mode:
+            #     formated_dcit['value'] = fetch_file_from_patch(formated_dcit['path_to_file'])
+            # else:
+            formated_dcit['value'] = r['value']
+            if r['field'] == "doc":
+                formated_dcit['start_line'] = r['metadata']['metadata']['start_line_documentation']
+                formated_dcit['end_line'] = r['metadata']['metadata']['end_line_documentation']
+            elif r['field'] == "code":
+                formated_dcit['start_line'] = r['metadata']['metadata']['start_line_code']
+                formated_dcit['end_line'] = r['metadata']['metadata']['end_line_code']
+
+            formated_dcit['score'] = round(r['score'], 3)
+
+            formated_results.append(formated_dcit)
+        return formated_results
 
     @staticmethod
     def _build_filter_conditions(conditions: dict, positive: bool = True):
@@ -200,12 +233,11 @@ class ManagerQdrantVectorDb:
         self._qdrant_vector_db.erase_database()
 
     @staticmethod
-    def filter_collections(collections, positive_filter_conditions=None, negative_filter_conditions=None): # TODO make it better
+    def _filter_collections(collections, positive_filter_conditions=None, negative_filter_conditions=None): # TODO make it better
         """
         Filter Qdrant collections by project name.
         - conditions must look like {"project": "ecodash"} or {"project": ["ecodash", "acbc"]}
         """
-        names = [c.name for c in collections]
 
         # positive has priority
         if positive_filter_conditions and "project" in positive_filter_conditions:
