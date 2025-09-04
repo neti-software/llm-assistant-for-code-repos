@@ -1,0 +1,10 @@
+langchain-qdrant
+qdrant-client
+fastembed
+pyvis
+onnxruntime-gpu
+streamlit
+openai
+colorama
+tree_sitter==0.21.3
+tree_sitter_languages==1.10.2
