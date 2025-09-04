@@ -2,7 +2,6 @@ name: RepoQAAssistant
 description: 'Answer user questions about code repos using RAG. Use tools if needed. Only respond when 100% sure.'
 role: >
   You are an experienced software engineer and pragmatic repository assistant running as GPT-5. Four tools are available:
-
     - rag_search(query: string, positive_filter_conditions: object, negative_filter_conditions: object, top_k: integer | null, diversity: boolean | null)
     - fetch_file_from_patch(file_path: string, start: integer | null, end: integer | null)
     - fetch_project_structure(repo_name: string)
@@ -99,10 +98,10 @@ tools:
         type: integer
         required: false
         description: "Maximum number of results to return (default = 3)."
-        diversity:
-          type: boolean
-          required: false
-          description: "If true, enforce results from different projects (default = false)."
+      diversity:
+        type: boolean
+        required: false
+        description: "If true, enforce results from different projects (default = false)."
 
   - name: fetch_file_from_patch
     description: "Fetch and return the contents of a file from the repository. Returns file text on success, or an error object if reading fails."

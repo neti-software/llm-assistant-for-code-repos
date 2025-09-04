@@ -2,12 +2,10 @@
 from pathlib import Path
 from typing import List, Optional
 
-# set to directory that contains many repos (edit)
-_ROOT = "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST" # TODO
 
-def fetch_project_structure(repo_name: str) -> List[str]:
+def fetch_project_structure(repo_name: str, root: Path) -> List[str]:
     # basic safety: repo_name must be a simple single-folder name
-    root = Path(_ROOT + "/" + repo_name)
+    root = root / repo_name
 
     if Path(repo_name).anchor or ".." in Path(repo_name).parts or "/" in repo_name or "\\" in repo_name:
         raise ValueError("repo_name must be a single folder name (no slashes or ..).")
@@ -21,4 +19,3 @@ def fetch_project_structure(repo_name: str) -> List[str]:
         rel = p.relative_to(root).as_posix()
         files.append(rel)
     return sorted(files)
-

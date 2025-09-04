@@ -5,16 +5,36 @@ import os
 
 
 class ConversationHistory:
-    def __init__(self, config: Dict, question: str):
+    def __init__(self, config: Dict):
         self.dir_to_save_chat_history = config["dir_to_save_chat_history"]
         self.history: Dict[str, Any] = {
-            "user_question": question,
+            "user_questions": {},  # dynamic keys user_question1, user_question2, ...
             "history": []
         }
         self.iteration = 0
+        self.question_counter = 0  # track how many user questions so far
 
-    def get_user_question(self):
-        return self.history['user_question']
+    def get_current_question(self) -> str:
+        """Return the latest user question."""
+        if self.question_counter == 0:
+            return None
+        return self.history["user_questions"].get(f"user_question{self.question_counter}")
+
+    def add_user_question(self, question: str):
+        """Append a new user question both to 'user_questions' dict and to history list."""
+        self.question_counter += 1
+        key = f"user_question{self.question_counter}"
+
+        # store in top-level dict
+        self.history["user_questions"][key] = question
+
+        # store in chronological history
+        self.history["history"].append({
+            "iteration": self.iteration,
+            key: question
+        })
+
+        self.iteration += 1
 
     def add_rag_results(self, results: List[Dict[str, Any]]):
         """Add initial RAG search results as iteration 0"""
@@ -48,7 +68,7 @@ class ConversationHistory:
         self.iteration += 1
 
     def to_json(self, indent: int = 2) -> str:
-        return json.dumps(self.history, indent=indent)
+        return json.dumps(self.history, indent=indent, default=str)
 
     def save(self) -> str:
         """

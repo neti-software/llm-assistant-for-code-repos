@@ -2,10 +2,9 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-_ROOT = "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST"
 
-def search_files_with_grep(pattern: str, sub_path: Optional[str] = None) -> List[str]:
-    base = Path(_ROOT).expanduser().resolve()
+def search_files_with_grep(pattern: str, root: Path, sub_path: Optional[str] = None) -> List[str]:
+    base = root.expanduser().resolve()
 
     if sub_path in (None, "", "."):
         target = base
