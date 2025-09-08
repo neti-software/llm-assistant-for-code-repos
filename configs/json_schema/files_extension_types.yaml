@@ -1,0 +1,111 @@
+source_code:
+  - go # done
+  - rs # done
+  - js # done
+  - ts # done
+  - tsx # done
+  - mjs # done
+  - cjs # done
+  - jsx # done
+  - py # done
+  - h # done
+  - hpp # done
+  - cpp # done
+  - c # done
+  - rb # done
+  - sol # done
+  - cl
+  - asm
+
+config_build:
+  - yml
+  - yaml
+  - toml
+  - sh
+  - bash
+  - mod
+  - sum
+  - sql
+  - cmake
+  - xml
+  - tf
+  - hcl
+  - conf
+  - ini
+  - nix
+  - bat
+  - dockerfile
+
+web_ui:
+  - html
+  - vue
+  - scss
+  - css
+  - less
+  - styl
+  - graphql
+
+notebooks_docs:
+  - ipynb # done +/-
+  - mdx
+  - adoc
+  - rst
+  - org
+  - tla
+  - puml
+  - mmd
+  - dot
+
+schemas_dsls:
+  - proto
+  - cql
+  - graphql
+  - ipldsch
+
+templates:
+  - tpl
+  - tmpl
+  - j2
+
+data_assets:
+  - png
+  - jpg
+  - jpeg
+  - gif
+  - svg
+  - ico
+  - webp
+  - mov
+  - mp4
+  - webm
+  - woff
+  - woff2
+  - ttf
+  - otf
+  - pdf
+  - docx
+  - pptx
+  - csv
+  - json
+  - ndjson
+  - jsonline
+  - parquet
+  - npz
+  - pkl
+  - pickle
+  - pb
+  - bin
+  - gz
+  - tgz
+  - tar
+  - zip
+  - zst
+  - stats
+  - dat
+  - cbor
+  - hex
+  - sig
+  - asc
+  - lock
+  - tfstate
+  - key

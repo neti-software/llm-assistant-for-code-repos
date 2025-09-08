@@ -10,11 +10,11 @@
     },
     "file_ext": {
       "type": "string",
-      "value": [".py", ".go", ".js", ".rs"]
+      "value": [".py", ".go", ".js", ".rs", ".cpp", ".c", ".hpp", ".h", ".ipynb", ".ts", ".mjs", ".cjs", ".tsx", ".jsx", ".rb", ".sol", ".md"]
     },
     "language": {
       "type": "string",
-      "value": ["python", "go", "javascript", "rust"]
+      "value": ["python", "go", "javascript", "rust", "cpp", "c", "hpp", "h", "ipynb", "typescript", "ruby", "solidity", "markdown"]
     },
     "namespace": {
       "type": "string",
