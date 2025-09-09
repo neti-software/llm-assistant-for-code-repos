@@ -15,6 +15,7 @@ from qdrant_client.models import (
 
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 from src.utils.profiler import execution_profiler
+from src.utils.helper import load_yaml
 
 
 class QdrantVectorDB:
@@ -46,11 +47,18 @@ class QdrantVectorDB:
         connection_cfg = cfg["connection"]
         collection_cfg = cfg["collection_settings"]
 
-        self.qdrant_client = QdrantClient(
-            url=connection_cfg["host_url"],
-            timeout=10
-        )
-        # self.collection_name = connection_cfg["collection_name"]
+        if connection_cfg["type"] == "local":
+            self.qdrant_client = QdrantClient(
+                url=connection_cfg["url"],
+                timeout=10
+            )
+        elif connection_cfg["type"] == "cloud":
+            self.qdrant_client = QdrantClient(
+                url=connection_cfg["url"],
+                api_key=load_yaml(connection_cfg["api_key_path"])["key"],
+                timeout=30,
+                prefer_grpc = True
+            )
 
         # Embedding model
         self.embedding_model = embedding_model
@@ -196,7 +204,7 @@ class QdrantVectorDB:
         zero_vecs = {k: [0.0] * vectors_config[k].size for k in embedding_keys}
         vectors_by_key: Dict[str, list] = {k: [None] * n for k in embedding_keys}
 
-        def process_key(key: str, is_code: bool):
+        def process_key(key: str, is_code: bool): # TODo jsut return normaly ar result and put  vectors_by_key as param
             items: list[tuple[int, str]] = []
             for i, doc in enumerate(documents):
                 v = doc.get(key)
@@ -284,7 +292,14 @@ class QdrantVectorDB:
 
         DANGER: This cannot be undone. It removes every collection, not just `self.collection_name`.
         """
-        collections = self.qdrant_client.get_collections()
-        names = [c.name for c in getattr(collections, "collections", [])]
+        resp = self.qdrant_client.get_collections()
+        names = [c.name for c in getattr(resp, "collections", [])]
         for name in names:
-            self.qdrant_client.delete_collection(name)
+            try:
+                self.qdrant_client.delete_collection(name)
+            except Exception as e:
+                print(f"failed to delete {name}: {e}")
+        # verify
+        remaining = getattr(self.qdrant_client.get_collections(), "collections", [])
+        if remaining:
+            raise RuntimeError(f"Collections remain: {[c.name for c in remaining]}")
