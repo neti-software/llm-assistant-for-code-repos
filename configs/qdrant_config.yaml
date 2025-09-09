@@ -5,3 +5,4 @@ connection:
 collection_settings:
   distance_metric: "cosine"                  # Vector similarity metric: cosine, dot, euclid
   upsert_batch_size: 100
+  embedding_batch_size: 64

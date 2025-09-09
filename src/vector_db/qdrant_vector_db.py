@@ -59,6 +59,8 @@ class QdrantVectorDB:
         self.distance_metric = self._DISTANCE_MAP[collection_cfg["distance_metric"]]
 
         self.upsert_batch_size = collection_cfg["upsert_batch_size"]
+        self.embedding_batch_size = collection_cfg["embedding_batch_size"]
+        self.cnt = 0
 
     # ------------- public API -------------
     @execution_profiler
@@ -187,37 +189,71 @@ class QdrantVectorDB:
             embedding_keys: set[str],
             vectors_config: Dict[str, VectorParams],
     ) -> list[PointStruct]:
-        points = []
-        for doc in documents:
-            metadata = doc.get("metadata", {})
-            vectors = {}
 
-            for key in embedding_keys:
-                value = doc.get(key)
+        points: list[PointStruct] = []
+        n = len(documents)
 
-                if value is None or str(value).strip() == "":
-                    dim = vectors_config[key].size
-                    vectors[key] = [0.0] * dim
+        zero_vecs = {k: [0.0] * vectors_config[k].size for k in embedding_keys}
+        vectors_by_key: Dict[str, list] = {k: [None] * n for k in embedding_keys}
+
+        def process_key(key: str, is_code: bool):
+            items: list[tuple[int, str]] = []
+            for i, doc in enumerate(documents):
+                v = doc.get(key)
+                if v is None or str(v).strip() == "":
+                    vectors_by_key[key][i] = zero_vecs[key]
                 else:
-                    if key.startswith("code"):
-                        vectors[key] = self.embedding_model.code_embed(str(value))
-                    else:
-                        vectors[key] = self.embedding_model.text_embed(str(value))
+                    items.append((i, str(v)))
 
+            if not items:
+                return
+
+            # pick batch function; expect it to exist
+            if is_code:
+                batch_fn = self.embedding_model.code_embed
+            else:
+                batch_fn = self.embedding_model.text_embed
+
+            for start in range(0, len(items), self.embedding_batch_size):
+                chunk = items[start: start + self.embedding_batch_size]
+                indices = [t[0] for t in chunk]
+                texts = [t[1] for t in chunk]
+
+                embeddings = batch_fn(texts)
+                if len(embeddings) != len(texts):
+                    raise RuntimeError(
+                        f"Embedding batch size mismatch for key='{key}': "
+                        f"expected {len(texts)} got {len(embeddings)}"
+                    )
+
+                for idx, emb in zip(indices, embeddings):
+                    vectors_by_key[key][idx] = emb
+
+            self.cnt += len(items)
+
+        process_key("code_to_embedded", is_code=True)
+        process_key("doc_to_embedded", is_code=False)
+
+        for i, doc in enumerate(documents):
+            meta = doc.get("metadata", {})
+            vecs = {k: (vectors_by_key[k][i] if vectors_by_key[k][i] is not None else zero_vecs[k])
+                    for k in embedding_keys}
             points.append(
                 PointStruct(
                     id=str(uuid.uuid4()),
-                    vector=vectors,
+                    vector=vecs,
                     payload={
-                        "project": metadata['repo'],
-                        "path": metadata['path'],
-                        "file_ext": metadata['file_ext'],
-                        "language": metadata['language'],
-                        "doc_kind": metadata["doc_kind"],
-                        "metadata": metadata  # full 20-30 fields
+                        "project": meta.get("repo"),
+                        "path": meta.get("path"),
+                        "file_ext": meta.get("file_ext"),
+                        "language": meta.get("language"),
+                        "doc_kind": meta.get("doc_kind"),
+                        "metadata": meta,
                     },
                 )
             )
+
+        print(f"Number of currently embedding vectors: {self.cnt}")
         return points
 
     def _create_payload_indexes(self) -> None:
