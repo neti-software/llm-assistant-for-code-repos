@@ -54,23 +54,22 @@ class CloudEmbedding(EmbeddingABC):
         return out[0] if isinstance(texts, str) else out
 
 
-    def _trim_texts_to_max_tokens(self, texts: List[str]) -> List[str]:
+    def _trim_texts_to_max_tokens(self, texts: List[str]) -> List[str]: # TODO ...
         def trim_one(text: str) -> str:
-            s = text or ""
-            if len(self.enc.encode(s)) <= self.max_tokens:
-                return s
+            if len(self.enc.encode(text)) <= self.max_tokens:
+                return text
 
-            lo, hi = 0, len(s)
+            lo, hi = 0, len(text)
             best = ""
             while lo < hi:
                 mid = (lo + hi) // 2
-                cand = s[:mid]
+                cand = text[:mid]
                 if len(self.enc.encode(cand)) <= self.max_tokens:
                     best = cand
                     lo = mid + 1
                 else:
                     hi = mid
-            return best if best else s[:1]
+            return best if best else text[:1]
 
         return [trim_one(t) for t in texts]
 
