@@ -68,7 +68,6 @@ class QdrantVectorDB:
 
         self.upsert_batch_size = collection_cfg["upsert_batch_size"]
         self.embedding_batch_size = collection_cfg["embedding_batch_size"]
-        self.cnt = 0
 
     # ------------- public API -------------
     @execution_profiler
@@ -237,13 +236,11 @@ class QdrantVectorDB:
                 for idx, emb in zip(indices, embeddings):
                     vectors_by_key[key][idx] = emb
 
-            self.cnt += len(items)
-
         process_key("code_to_embedded", is_code=True)
         process_key("doc_to_embedded", is_code=False)
 
         for i, doc in enumerate(documents):
-            meta = doc.get("metadata", {})
+            metadata = doc.get("metadata", {})
             vecs = {k: (vectors_by_key[k][i] if vectors_by_key[k][i] is not None else zero_vecs[k])
                     for k in embedding_keys}
             points.append(
@@ -251,17 +248,16 @@ class QdrantVectorDB:
                     id=str(uuid.uuid4()),
                     vector=vecs,
                     payload={
-                        "project": meta.get("repo"),
-                        "path": meta.get("path"),
-                        "file_ext": meta.get("file_ext"),
-                        "language": meta.get("language"),
-                        "doc_kind": meta.get("doc_kind"),
-                        "metadata": meta,
+                        "project": metadata['repo'],
+                        "path": metadata['path'],
+                        "file_ext": metadata['file_ext'],
+                        "language": metadata['language'],
+                        "doc_kind": metadata["doc_kind"],
+                        "metadata": metadata  # full 20-30 fields
                     },
                 )
             )
 
-        print(f"Number of currently embedding vectors: {self.cnt}")
         return points
 
     def _create_payload_indexes(self) -> None:
