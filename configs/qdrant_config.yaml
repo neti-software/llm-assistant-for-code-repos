@@ -1,7 +1,11 @@
 connection:
-  host_url: "http://127.0.0.1:7000"
+  type: "cloud"
+#  url: "http://127.0.0.1:7000"
+  url: "https://fb77c321-c9c6-474e-8ad3-b9ed91822f52.europe-west3-0.gcp.cloud.qdrant.io"
   container_name: "qdrant"
+  api_key_path: "configs/qdrant_api_key.yaml"
 
 collection_settings:
   distance_metric: "cosine"                  # Vector similarity metric: cosine, dot, euclid
-  upsert_batch_size: 100
+  upsert_batch_size: 32
+  embedding_batch_size: 64

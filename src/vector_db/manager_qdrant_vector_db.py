@@ -23,11 +23,11 @@ class ManagerQdrantVectorDb:
         self.metadata_extractor_manager = MetadataExtractorManager(repo_metadata_manager_config, ignore_patterns_config)
 
         # Parse connection settings
-        self.host_url: str = config["connection"]["host_url"]
+        self.host_url: str = config["connection"]["url"]
         self.container_name: str = config["connection"].get("container_name", "qdrant")
 
         # Derive port from host_url (assume format http://host:port)
-        self.port: int = int(self.host_url.split(":")[-1])
+        # self.port: int = int(self.host_url.split(":")[-1])
 
         # Run Qdrant if needed
         # self._run_docker()

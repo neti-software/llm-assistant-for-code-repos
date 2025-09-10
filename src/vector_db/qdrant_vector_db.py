@@ -15,6 +15,7 @@ from qdrant_client.models import (
 
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 from src.utils.profiler import execution_profiler
+from src.utils.helper import load_yaml
 
 
 class QdrantVectorDB:
@@ -46,11 +47,18 @@ class QdrantVectorDB:
         connection_cfg = cfg["connection"]
         collection_cfg = cfg["collection_settings"]
 
-        self.qdrant_client = QdrantClient(
-            url=connection_cfg["host_url"],
-            timeout=10
-        )
-        # self.collection_name = connection_cfg["collection_name"]
+        if connection_cfg["type"] == "local":
+            self.qdrant_client = QdrantClient(
+                url=connection_cfg["url"],
+                timeout=10
+            )
+        elif connection_cfg["type"] == "cloud":
+            self.qdrant_client = QdrantClient(
+                url=connection_cfg["url"],
+                api_key=load_yaml(connection_cfg["api_key_path"])["key"],
+                timeout=30,
+                prefer_grpc = True
+            )
 
         # Embedding model
         self.embedding_model = embedding_model
@@ -59,6 +67,7 @@ class QdrantVectorDB:
         self.distance_metric = self._DISTANCE_MAP[collection_cfg["distance_metric"]]
 
         self.upsert_batch_size = collection_cfg["upsert_batch_size"]
+        self.embedding_batch_size = collection_cfg["embedding_batch_size"]
 
     # ------------- public API -------------
     @execution_profiler
@@ -187,27 +196,57 @@ class QdrantVectorDB:
             embedding_keys: set[str],
             vectors_config: Dict[str, VectorParams],
     ) -> list[PointStruct]:
-        points = []
-        for doc in documents:
-            metadata = doc.get("metadata", {})
-            vectors = {}
 
-            for key in embedding_keys:
-                value = doc.get(key)
+        points: list[PointStruct] = []
+        n = len(documents)
 
-                if value is None or str(value).strip() == "":
-                    dim = vectors_config[key].size
-                    vectors[key] = [0.0] * dim
+        zero_vecs = {k: [0.0] * vectors_config[k].size for k in embedding_keys}
+        vectors_by_key: Dict[str, list] = {k: [None] * n for k in embedding_keys}
+
+        def process_key(key: str, is_code: bool): # TODo jsut return normaly ar result and put  vectors_by_key as param
+            items: list[tuple[int, str]] = []
+            for i, doc in enumerate(documents):
+                v = doc.get(key)
+                if v is None or str(v).strip() == "":
+                    vectors_by_key[key][i] = zero_vecs[key]
                 else:
-                    if key.startswith("code"):
-                        vectors[key] = self.embedding_model.code_embed(str(value))
-                    else:
-                        vectors[key] = self.embedding_model.text_embed(str(value))
+                    items.append((i, str(v)))
 
+            if not items:
+                return
+
+            # pick batch function; expect it to exist
+            if is_code:
+                batch_fn = self.embedding_model.code_embed
+            else:
+                batch_fn = self.embedding_model.text_embed
+
+            for start in range(0, len(items), self.embedding_batch_size):
+                chunk = items[start: start + self.embedding_batch_size]
+                indices = [t[0] for t in chunk]
+                texts = [t[1] for t in chunk]
+
+                embeddings = batch_fn(texts)
+                if len(embeddings) != len(texts):
+                    raise RuntimeError(
+                        f"Embedding batch size mismatch for key='{key}': "
+                        f"expected {len(texts)} got {len(embeddings)}"
+                    )
+
+                for idx, emb in zip(indices, embeddings):
+                    vectors_by_key[key][idx] = emb
+
+        process_key("code_to_embedded", is_code=True)
+        process_key("doc_to_embedded", is_code=False)
+
+        for i, doc in enumerate(documents):
+            metadata = doc.get("metadata", {})
+            vecs = {k: (vectors_by_key[k][i] if vectors_by_key[k][i] is not None else zero_vecs[k])
+                    for k in embedding_keys}
             points.append(
                 PointStruct(
                     id=str(uuid.uuid4()),
-                    vector=vectors,
+                    vector=vecs,
                     payload={
                         "project": metadata['repo'],
                         "path": metadata['path'],
@@ -218,6 +257,7 @@ class QdrantVectorDB:
                     },
                 )
             )
+
         return points
 
     def _create_payload_indexes(self) -> None:
@@ -248,7 +288,14 @@ class QdrantVectorDB:
 
         DANGER: This cannot be undone. It removes every collection, not just `self.collection_name`.
         """
-        collections = self.qdrant_client.get_collections()
-        names = [c.name for c in getattr(collections, "collections", [])]
+        resp = self.qdrant_client.get_collections()
+        names = [c.name for c in getattr(resp, "collections", [])]
         for name in names:
-            self.qdrant_client.delete_collection(name)
+            try:
+                self.qdrant_client.delete_collection(name)
+            except Exception as e:
+                print(f"failed to delete {name}: {e}")
+        # verify
+        remaining = getattr(self.qdrant_client.get_collections(), "collections", [])
+        if remaining:
+            raise RuntimeError(f"Collections remain: {[c.name for c in remaining]}")
