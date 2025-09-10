@@ -3,8 +3,6 @@ import inspect
 from pathlib import Path
 
 from src.tools_to_call.fetch_file_from_patch import fetch_file_from_patch
-from src.tools_to_call.fetch_file_from_query import fetch_file_from_query
-from src.tools_to_call.fetch_metadata_from_query import fetch_metadata_from_query
 from src.tools_to_call.fetch_project_structure import fetch_project_structure
 from src.tools_to_call.search_files_with_grep import search_files_with_grep
 
@@ -16,8 +14,6 @@ class ToolManager:
         # Registry of available tools
         self.tools: Dict[str, Callable[..., Any]] = {
             "fetch_file_from_patch": fetch_file_from_patch,
-            "fetch_file_from_query": fetch_file_from_query,
-            "fetch_metadata_from_query": fetch_metadata_from_query,
             "fetch_project_structure": fetch_project_structure,
             "search_files_with_grep": search_files_with_grep,
         }
