@@ -5,9 +5,6 @@ from src.embedding_module.embedding_abc import EmbeddingABC
 from src.utils.helper import load_yaml
 import os
 
-def _ensure_list(x: Union[str, List[str]]) -> List[str]:
-    return [x] if isinstance(x, str) else list(x)
-
 
 class CloudEmbedding(EmbeddingABC):
     """Minimal OpenAI-only cloud embedding wrapper with dim validation."""
@@ -37,7 +34,7 @@ class CloudEmbedding(EmbeddingABC):
         self.max_tokens = 8192 - 2000 # TODO , some spaces....
 
     def embed(self, texts: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
-        items = _ensure_list(texts)
+        items = self._ensure_list(texts)
         if len(items) == 0:
             return [] if isinstance(texts, list) else []
 
@@ -76,3 +73,7 @@ class CloudEmbedding(EmbeddingABC):
             return best if best else s[:1]
 
         return [trim_one(t) for t in texts]
+
+    @staticmethod
+    def _ensure_list(x: Union[str, List[str]]) -> List[str]: # TODO ... blend it to embed func?
+        return [x] if isinstance(x, str) else list(x)
