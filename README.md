@@ -47,10 +47,12 @@ python src/download_org_repos.py fiddler-labs
 ---
 
 ## 5. Build the Vector Database
-Estimated time: **10–30 minutes** (GPU recommended).  
+Estimated time: **10–30 minutes** (GPU recommended).
 ```bash
 python main_build_db.py
 ```
+### DevOps Notice:
+Do not run this script if the configuration is set to use a cloud database. Run it only when you explicitly intend to build new embeddings and are certain of the implications.
 
 ---
 
