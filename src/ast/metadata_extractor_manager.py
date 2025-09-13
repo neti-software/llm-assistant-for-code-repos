@@ -25,6 +25,10 @@ class MetadataExtractorManager:
 
         self._ignore_patterns = [p for v in ignore_patterns_config.values() for p in v]
 
+        # TODO move it to config
+        self._max_file_size = 1024  # kb
+        self._max_file_length = 3000  # lines
+
     @execution_profiler
     def process_repo(self, repo_path) -> Dict[str, dict]:
         repo_path = Path(repo_path).resolve()
@@ -45,6 +49,11 @@ class MetadataExtractorManager:
             extractor = self._extractor_by_ext.get(suffix)
             if extractor is None:
                 # skip unknown extensions
+                continue
+
+            lines, size_kb = self._count_lines_and_size(str(file_path))
+            if lines > self._max_file_length or size_kb > self._max_file_size:
+                print(f"SKIP: {rel_path} (too big file: size {size_kb / 1024})")
                 continue
 
             try:
@@ -81,4 +90,13 @@ class MetadataExtractorManager:
 
         return results
 
-
+    @staticmethod
+    def _count_lines_and_size(path: str) -> tuple[int, float]:
+        p = Path(path)
+        size_bytes = p.stat().st_size
+        lines = 0
+        with p.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                lines += chunk.count(b"\n")
+        size_kb = size_bytes / 1024
+        return lines, size_kb

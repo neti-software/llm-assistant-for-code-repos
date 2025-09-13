@@ -1,13 +1,15 @@
 text:
   type: cloud
   dim: 1024
-  provider: openai
-  model_name: text-embedding-3-large
-  api_key_path: "configs/openai_key.yaml"
+  provider: voyager
+  model_name: voyage-3-large
+  max_tokens: 32000
+  api_key_path: "configs/voyager_api_key.yaml"
 
 code:
   type: cloud
   dim: 1024
-  provider: openai
-  model_name: text-embedding-3-large
-  api_key: "configs/openai_key.yaml"
+  provider: voyager
+  model_name: voyage-code-3
+  max_tokens: 16000
+  api_key_path: "configs/voyager_api_key.yaml"

@@ -29,15 +29,19 @@ def main():
     )
     print("✅ Qdrant Vector DB Manager initialized")
 
-    print("\n🗑️ Deleting existing Qdrant DB (if any)...")
-    manager_qdrant_vector_db.delete_db()
-    print("✅ Database deleted")
+    print("Are you sure to delete db? Press Y")
+    user_input = input().strip()
+    if user_input == "Y":
+        print("\n🗑️ Deleting existing Qdrant DB (if any)...")
+        manager_qdrant_vector_db.delete_db()  # uncomment to actually delete
+        print("✅ Database deleted")
 
-    repo_dir = repos_config["path_to_repos"]
-    print(f"\n📂 Creating vector DB from directory: {repo_dir}")
-    manager_qdrant_vector_db.create_vector_db_from_dir(repo_dir)
-    print("✅ Vector DB created successfully")
-
+        repo_dir = repos_config["path_to_repos"]
+        print(f"\n📂 Creating vector DB from directory: {repo_dir}")
+        manager_qdrant_vector_db.create_vector_db_from_dir(repo_dir)
+        print("✅ Vector DB created successfully")
+    else:
+        print("❌ Aborted. Database not deleted.")
 
 if __name__ == "__main__":
     main()

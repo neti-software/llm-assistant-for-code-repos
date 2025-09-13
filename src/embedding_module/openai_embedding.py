@@ -6,7 +6,7 @@ from src.utils.helper import load_yaml
 import os
 
 
-class CloudEmbedding(EmbeddingABC):
+class OpenaiEmbedding(EmbeddingABC):
     """Minimal OpenAI-only cloud embedding wrapper with dim validation."""
 
     def __init__(self, config: Dict[str, Any]):
@@ -27,7 +27,6 @@ class CloudEmbedding(EmbeddingABC):
             raise ValueError("OpenAI API key not found in config or OPENAI_API_KEY env")
 
         self.client = OpenAI(api_key=api_key)
-        self.batch_size = int(config.get("batch_size", 256))
         self.dim_size = int(config.get("dim")) if config.get("dim") is not None else None
 
         self.enc = tiktoken.get_encoding("cl100k_base")
@@ -38,20 +37,12 @@ class CloudEmbedding(EmbeddingABC):
         if len(items) == 0:
             return [] if isinstance(texts, list) else []
 
-        out: List[List[float]] = []
-        for i in range(0, len(items), self.batch_size):
-            batch = items[i : i + self.batch_size]
-            batch = self._trim_texts_to_max_tokens(batch)
-            resp = self.client.embeddings.create(model=self.model_name, input=batch, dimensions=self.dim_size)
-            for entry in resp.data:
-                vec = entry.embedding
-                if self.dim_size is not None and len(vec) != self.dim_size:
-                    raise ValueError(
-                        f"Embedding dimension mismatch: model returned {len(vec)} but config.dim={self.dim_size}"
-                    )
-                out.append(vec)
+        items = self._trim_texts_to_max_tokens(items)
+        resp = self.client.embeddings.create(model=self.model_name, input=items, dimensions=self.dim_size)
 
-        return out[0] if isinstance(texts, str) else out
+        embeds = [data.embedding for data in resp.data]
+
+        return embeds[0] if isinstance(texts, str) else embeds
 
 
     def _trim_texts_to_max_tokens(self, texts: List[str]) -> List[str]: # TODO ...
