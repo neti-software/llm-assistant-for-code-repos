@@ -25,6 +25,7 @@ class ManagerQdrantVectorDb:
         # Parse connection settings
         self.host_url: str = config["connection"]["url"]
         self.container_name: str = config["connection"].get("container_name", "qdrant")
+        self.build_only_code: bool = config["collection_settings"]["build_only_code"]
 
         # Derive port from host_url (assume format http://host:port)
         # self.port: int = int(self.host_url.split(":")[-1])
@@ -86,10 +87,10 @@ class ManagerQdrantVectorDb:
     @execution_profiler
     def create_vector_db_from_dir(self, root_repos_dir):
         repos_dir = [d for d in glob.glob(os.path.join(root_repos_dir, "*/")) if os.path.isdir(d)]
-        cnt = 0
+        # cnt = 0
         for repo_path in tqdm(map(Path, repos_dir), desc="Processing repos"):
             # cnt +=1
-            # if cnt < 110:
+            # if cnt < 134:
             #     continue
             repo_root = Path(repo_path).resolve()
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
@@ -102,10 +103,11 @@ class ManagerQdrantVectorDb:
                 continue
 
             self._qdrant_vector_db.create_collection_with_data(docs,
+                                                               only_code=self.build_only_code,
                                                                overwrite_existing=True)  # TODO overwrite_existing?
 
     @execution_profiler
-    def search(self, query: str, top_k: int = 3, per_field: bool = True,
+    def search(self, query: str, top_k: int = 3, per_field: bool = False,
                positive_filter_conditions: dict = None,
                negative_filter_conditions: dict = None,
                diversity: bool = False): # TODO change to number like give at least 3 diversity repo
@@ -121,28 +123,35 @@ class ManagerQdrantVectorDb:
                                                         positive_filter_conditions=positive_filter_conditions,
                                                         negative_filter_conditions=negative_filter_conditions)
 
+        query_code_vector = self.embedding_model.code_embed(query)
+        if per_field:
+            query_doc_vector = self.embedding_model.text_embed(query)
+        else:
+            query_doc_vector = None
+
         all_hits = []
         # 3) Loop through collections
         for collection in filtered_collections:
             cname = collection.name
             hits = self._qdrant_vector_db.search_collection(
                 collection_name=cname,
-                query_text=query,
+                query_code_vector=query_code_vector,
+                query_doc_vector=query_doc_vector,
                 top_k=top_k,  # local top_k per collection
-                per_field=per_field,
             )
 
             # 4) Collect results with metadata
             for field, results in hits.items():
-                for hit in results:
-                    score = getattr(hit, "score", None)
-                    all_hits.append({
-                        "collection": cname,
-                        "field": field,
-                        "value": hit.payload["metadata"].get(field, "<missing>"),
-                        "score": score,
-                        "metadata": hit.payload
-                    })
+                if results:
+                    for hit in results:
+                        score = getattr(hit, "score", None)
+                        all_hits.append({
+                            "collection": cname,
+                            "field": field,
+                            "value": hit.payload["metadata"].get(field, "<missing>"),
+                            "score": score,
+                            "metadata": hit.payload
+                        })
 
         # 5) Keep only global top_k (with optional diversity)
         def _score(h):

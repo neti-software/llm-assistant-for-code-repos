@@ -1,7 +1,8 @@
 from typing import Dict, Any, Union, List
 from pathlib import Path
 from src.embedding_module.local_embedding import LocalEmbedding
-from src.embedding_module.cloud_embedding import CloudEmbedding
+from src.embedding_module.openai_embedding import OpenaiEmbedding
+from src.embedding_module.voyager_embedding import VoyagerEmbedding
 
 
 class EmbeddingBuilder:
@@ -30,7 +31,13 @@ class EmbeddingBuilder:
         if etype == "local":
             return LocalEmbedding(cfg)
         elif etype == "cloud":
-            return CloudEmbedding(cfg)
+            provider = cfg["provider"]
+            if provider == "openai":
+                return OpenaiEmbedding(cfg)
+            elif provider == "voyager":
+                return VoyagerEmbedding(cfg)
+            else:
+                raise ValueError(f"Unknown provider type: {provider}")
         else:
             raise ValueError(f"Unknown embedding type: {etype}")
 

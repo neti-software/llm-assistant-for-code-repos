@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
-from src.utils.helper import SingletonABCMeta
 
 
-class EmbeddingABC(ABC, metaclass=SingletonABCMeta):
+class EmbeddingABC(ABC):
     """Abstract base class for embedding models."""
 
     @abstractmethod
