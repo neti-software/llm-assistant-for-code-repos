@@ -1,4 +1,4 @@
-from src.llm_module.cloud_llm import CloudLLM
+from src.llm_module.llm_builder import build_llm
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
@@ -23,7 +23,45 @@ def build_core():
     repos_config = load_yaml("configs/repos_config.yaml")
 
     print(f"{Fore.CYAN}Initializing core components...{Style.RESET_ALL}")
-    llm = CloudLLM(llm_config)
+    llm = build_llm(llm_config)
+    # Indicator: Print PromptLayer status and first line (or issue)
+    try:
+        get_status = getattr(llm, "get_promptlayer_status", None)
+        if callable(get_status):
+            st = get_status()
+            if st.get("active"):
+                yaml_name = st.get("yaml_prompt_name", "unknown")
+                pl_name = st.get("prompt_name", "unknown")
+                
+                if st.get("template_fetched") and st.get("first_line"):
+                    print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
+                    print(f"{Fore.GREEN}Prompt preview:{Style.RESET_ALL} {st['first_line']}")
+                elif st.get("template_fetched"):
+                    print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name} (no preview)")
+                else:
+                    print(f"{Fore.YELLOW}PromptLayer connected:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
+                    if st.get("prompt_fetch_error"):
+                        print(f"{Fore.YELLOW}Template fetch error:{Style.RESET_ALL} {st['prompt_fetch_error']}")
+                        print(f"{Fore.YELLOW}This might cause fallback to generic prompt!{Style.RESET_ALL}")
+            else:
+                yaml_name = st.get("yaml_prompt_name", "unknown")
+                reasons = []
+                if not st.get("import_ok", True):
+                    reasons.append("promptlayer not installed")
+                    
+                if not st.get("key_present", True):
+                    reasons.append("PROMPT_LAYER_API_KEY missing in .env")
+                if st.get("client_init_error"):
+                    reasons.append(f"client init error: {st['client_init_error']}")
+                reason_text = "; ".join(reasons) or "unknown"
+                print(f"{Fore.YELLOW}PromptLayer disabled:{Style.RESET_ALL} {reason_text}. Using YAML prompt '{yaml_name}' instead.")
+        else:
+            # Backward-compatible minimal indicator
+            pl_first_line = getattr(llm, "get_promptlayer_prompt_first_line", lambda: None)()
+            if pl_first_line:
+                print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} {pl_first_line}")
+    except Exception as e:
+        print(f"{Fore.YELLOW}PromptLayer status error:{Style.RESET_ALL} {e}")
     manager_qdrant_vector_db = ManagerQdrantVectorDb(
         qdrant_config,
         embedding_config,
@@ -40,7 +78,7 @@ def build_core():
     return llm, tool_manager, conversation_history
 
 
-def llm_loop(llm: CloudLLM, tool_manager: ToolManager, conversation_history: ConversationHistory) -> dict:
+def llm_loop(llm, tool_manager: ToolManager, conversation_history: ConversationHistory) -> dict:
     """Run a single LLM self-loop until it produces a final response, with step tracing."""
     iteration = 0
     while True:
