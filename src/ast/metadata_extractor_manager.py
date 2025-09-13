@@ -2,10 +2,6 @@ from pathlib import Path
 from typing import Dict
 import fnmatch
 from src.utils.profiler import execution_profiler
-from src.ast.metadata_extractor_python import MetadataExtractorPython
-from src.ast.metadata_extractor_go import MetadataExtractorGo
-from src.ast.metadata_extractor_javascript import MetadataExtractorJS
-from src.ast.metadata_extractor_rust import MetadataExtractorRust
 from src.ast.metadata_validator import MetadataValidator
 from src.ast.metadata_extractor_python import MetadataExtractorPython
 from src.ast.metadata_extractor_ipynb import MetadataExtractorIpynb
@@ -17,6 +13,7 @@ from src.ast.metadata_extractor_cpp import MetadataExtractorCAndCpp
 from src.ast.metadata_extractor_headers import MetadataExtractorHeaders
 from src.ast.metadata_extractor_ruby import MetadataExtractorRuby
 from src.ast.metadata_extractor_solidity import MetadataExtractorSolidity
+from src.ast.metadata_extractor_markdown import MetadataExtractorMarkdown
 
 
 class MetadataExtractorManager:
@@ -41,6 +38,7 @@ class MetadataExtractorManager:
             ".jsx": MetadataExtractorJS(),
             ".rb": MetadataExtractorRuby(),
             ".sol": MetadataExtractorSolidity(),
+            ".md": MetadataExtractorMarkdown()
         }
 
         self._ignore_patterns = [p for v in ignore_patterns_config.values() for p in v]
@@ -62,7 +60,7 @@ class MetadataExtractorManager:
 
             # --- skip ignored files ---
             if any(fnmatch.fnmatch(rel_path, pat) for pat in self._ignore_patterns):
-                # print(f"SKIP: {rel_path} (matched ignore pattern)")
+                print(f"SKIP: {rel_path} (matched ignore pattern)")
                 continue
 
             suffix = file_path.suffix.lower()

@@ -104,7 +104,7 @@ class ManagerQdrantVectorDb:
 
             self._qdrant_vector_db.create_collection_with_data(docs,
                                                                only_code=self.build_only_code,
-                                                               overwrite_existing=True)  # TODO overwrite_existing?
+                                                               overwrite_existing=False)
 
     @execution_profiler
     def search(self, query: str, top_k: int = 3, per_field: bool = False,
@@ -179,6 +179,77 @@ class ManagerQdrantVectorDb:
                     top_results.append(h)
                     if len(top_results) == top_k:
                         break
+
+        # 6) Print nicely
+        print(f"\n🏆 Global Top {top_k} Results:")
+        for rank, hit in enumerate(top_results, start=1):
+            sc = hit["score"]
+            sc_txt = f"{sc:.4f}" if sc is not None else "None"
+            print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={sc_txt})")
+
+        return self._minimalize_rag_results(top_results)
+
+    @execution_profiler
+    def search_project_readme(self, query: str, top_k: int = 3):
+        # TODO merge code with search() to avoid duplciate code. Low priority
+        print(f"\n🔍 Searching for: {query!r}")
+
+        # 1) Get all collections
+        collections = self._qdrant_vector_db.qdrant_client.get_collections().collections
+        if not collections:
+            print("⚠️ No collections found in Qdrant.")
+            return []
+
+        query_code_vector = self.embedding_model.code_embed(query)
+
+        all_hits = []
+        # 3) Loop through collections
+        for collection in collections:
+            cname = collection.name
+            hits = self._qdrant_vector_db.search_collection(
+                collection_name=cname,
+                query_code_vector=query_code_vector,
+                query_doc_vector=None,
+                top_k=1,
+                filter_conditions={"path": ["README.md", "Readme.md", "readme.md"]}  # we search only on top repo readme
+            )
+
+            # 4) Collect results with metadata
+            for field, results in hits.items():
+                if results:
+                    for hit in results:
+                        score = getattr(hit, "score", None)
+                        all_hits.append({
+                            "collection": cname,
+                            "field": field,
+                            "value": hit.payload["metadata"].get(field, "<missing>"),
+                            "score": score,
+                            "metadata": hit.payload
+                        })
+
+        # 5) Keep only global top_k (with optional diversity)
+        def _score(h):
+            return h["score"] if (h["score"] is not None) else float("-inf")
+
+        sorted_hits = sorted(all_hits, key=_score, reverse=True)
+
+        top_results = []
+        used_collections = set()
+        # 1) pick one top hit per collection
+        for h in sorted_hits:
+            if h["collection"] not in used_collections:
+                top_results.append(h)
+                used_collections.add(h["collection"])
+            if len(top_results) == top_k:
+                break
+        # 2) if not enough distinct collections, fill with highest remaining hits
+        if len(top_results) < top_k:
+            for h in sorted_hits:
+                if h in top_results:
+                    continue
+                top_results.append(h)
+                if len(top_results) == top_k:
+                    break
 
         # 6) Print nicely
         print(f"\n🏆 Global Top {top_k} Results:")

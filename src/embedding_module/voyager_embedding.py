@@ -13,6 +13,7 @@ class VoyagerEmbedding(EmbeddingABC):
         self.dim_size = int(config["dim"])
         self.max_tokens = int(config["max_tokens"])
 
+    # TODO fix voyager when using batch.. max is 120k tokens on one go. Safe are batch = 8
     def embed(self, texts: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
         items = self._ensure_list(texts)
         if len(items) == 0:

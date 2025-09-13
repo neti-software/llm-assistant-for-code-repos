@@ -3,7 +3,7 @@ import yaml
 from pathlib import Path
 from typing import List, Dict, Optional
 
-
+# TODO we embedding a whole file to single vector, think about better solution?
 class MetadataExtractorMarkdown:
     """
     Extract metadata from .md files.
@@ -29,33 +29,34 @@ class MetadataExtractorMarkdown:
         rel_path = p.relative_to(repo_root).as_posix() if repo_root else str(p)
 
         frontmatter, fm_start, fm_end = self._extract_frontmatter(src_text)
-        code_blocks = self._find_code_blocks(src_text)
-
-        # Build functions list from code blocks
-        functions: List[Dict] = []
-        for i, cb in enumerate(code_blocks, start=1):
-            sig = self._first_non_empty_line(cb["code"]) or ""
-            sig = sig.strip()
-            if len(sig) > 240:
-                sig = sig[:237] + "..."
-            functions.append({
-                "path": rel_path,
-                "symbol_name": f"code_block_{i}",
-                "enclosing_class": None,
-                "signature": sig,
-                "docstring": None,
-                "start_line_documentation": None,
-                "end_line_documentation": None,
-                "start_line_code": cb["start_line"],
-                "end_line_code": cb["end_line"],
-                "language": cb["lang"] or None,
-                "code": cb["code"]
-            })
+        # code_blocks = self._find_code_blocks(src_text)
+        #
+        # # Build functions list from code blocks
+        # functions: List[Dict] = []
+        # for i, cb in enumerate(code_blocks, start=1):
+        #     sig = self._first_non_empty_line(cb["code"]) or ""
+        #     sig = sig.strip()
+        #     if len(sig) > 240:
+        #         sig = sig[:237] + "..."
+        #     functions.append({
+        #         "path": rel_path,
+        #         "symbol_name": f"code_block_{i}",
+        #         "enclosing_class": None,
+        #         "signature": sig,
+        #         "docstring": None,
+        #         "start_line_documentation": None,
+        #         "end_line_documentation": None,
+        #         "start_line_code": cb["start_line"],
+        #         "end_line_code": cb["end_line"],
+        #         "language": cb["lang"] or None,
+        #         "code": cb["code"]
+        #     })
 
         # Clean text: remove frontmatter and code blocks, then strip markdown artifacts
         text_without_fm = self._remove_range(src_text, fm_start, fm_end) if fm_start is not None else src_text
-        text_no_code = self._mask_out_code_blocks(text_without_fm, code_blocks)
-        cleaned_text = self._clean_markdown_text(text_no_code)
+        # text_no_code = self._mask_out_code_blocks(text_without_fm, code_blocks)
+        # cleaned_text = self._clean_markdown_text(text_no_code)
+        cleaned_text = self._clean_markdown_text(text_without_fm)
 
         lines = cleaned_text.splitlines()
         start_doc_line = 1 if lines else None
@@ -72,10 +73,12 @@ class MetadataExtractorMarkdown:
         if not title:
             title = p.stem
 
-        classes = [{
+        document = [{
             "path": rel_path,
             "symbol_name": title,
             "docstring": cleaned_text,
+            "enclosing_class": None,
+            "signature": "None",
             "start_line_documentation": start_doc_line,
             "end_line_documentation": end_doc_line,
             "start_line_code": start_doc_line,
@@ -85,14 +88,17 @@ class MetadataExtractorMarkdown:
 
         global_meta = {
             "repo": repo_name,
-            "path": rel_path,
+            "path": rel_path, # easier to find
             "file_ext": ".md",
             "language": "markdown",
             "namespace": "",
-            "doc_kind": "docs",
-            "frontmatter": frontmatter if frontmatter else None,
-            "classes": classes,
-            "functions": functions if functions else None
+            # TODO: agreed to store README in vector DB; only code is allowed otherwise, with .md as the exception
+            "doc_kind": "code",
+            "module_docstring_end": 0,  # No doc in readme
+            "imports": None,
+            "classes": None,
+            # "functions": functions if functions else None
+            "functions": document
         }
         return global_meta
 
@@ -165,9 +171,9 @@ class MetadataExtractorMarkdown:
         # remove heading markers
         s = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", s)
         # remove emphasis and inline code ticks
-        s = re.sub(r"(`+)(.*?)\1", r"\2", s)       # inline code
+        s = re.sub(r"(`+)(.*?)\1", r"\2", s)  # inline code
         s = re.sub(r"(\*\*|__)(.*?)\1", r"\2", s)  # bold
-        s = re.sub(r"(\*|_)(.*?)\1", r"\2", s)     # italic
+        s = re.sub(r"(\*|_)(.*?)\1", r"\2", s)  # italic
         # remove blockquote markers
         s = re.sub(r"(?m)^\s*>+\s?", "", s)
         # remove markdown table pipes but keep content
@@ -180,8 +186,10 @@ class MetadataExtractorMarkdown:
         return s.strip()
 
 
-x = MetadataExtractorMarkdown()
-file_path= "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST/filecoin-solidity/README.md"
-repo_root= "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST/filecoin-solidity"
-
-x.extract(file_path=file_path, repo_root=repo_root)
+# x = MetadataExtractorMarkdown()
+# file_path = "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST/filecoin-solidity/README.md"
+# repo_root = "/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/DATA_TO_TEST/filecoin-solidity"
+#
+# m = x.extract(file_path=file_path, repo_root=repo_root)
+#
+# k = 1

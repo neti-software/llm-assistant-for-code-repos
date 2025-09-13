@@ -63,6 +63,7 @@ class StreamlitChat:
         )
         self.tool_manager = ToolManager(repos_config["path_to_repos"]) # TODO , what to do with that path?
         self.tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
+        self.tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
         self.conversation_history = ConversationHistory(conversation_history_config)
 
     # unified logger -> terminal + live UI

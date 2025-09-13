@@ -71,6 +71,7 @@ def build_core():
 
     tool_manager = ToolManager(repos_config["path_to_repos"]) # TODO , what to do with that path?
     tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
+    tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
 
     conversation_history = ConversationHistory(conversation_history_config)
 

@@ -42,15 +42,20 @@ class MetadataExtractorSolidity:
 
         # build classes from contract/interface nodes
         classes: List[Dict] = []
-        for node in self._find_nodes(root, {"contract_definition", "interface_definition"}):
+        for node in self._find_nodes(root, {"contract_definition", "interface_definition", "struct_definition"}):
             name = self._node_name(src_bytes, node) or ""
-            kind = "interface" if node.type == "interface_definition" else "contract"
+            if node.type == "interface_definition":
+                kind = "interface"
+            elif node.type == "struct_definition":
+                kind = "struct"
+            else:
+                kind = "contract"
             doc, sdoc, edoc = self._leading_docstring(src_bytes, comments, node)
             s_code, e_code = self._node_extent_lines(node)
             classes.append({
                 "path": rel_path,
                 "symbol_name": name,
-                "kind": kind,                     # optional extra field, harmless if consumer ignores
+                "kind": kind,
                 "docstring": doc,
                 "start_line_documentation": sdoc,
                 "end_line_documentation": edoc,
@@ -73,7 +78,7 @@ class MetadataExtractorSolidity:
             fdoc, fs, fe = self._leading_docstring(src_bytes, comments, node)
             s_code, e_code = self._node_extent_lines(node)
 
-            anc = self._find_ancestor(node, {"contract_definition", "interface_definition"})
+            anc = self._find_ancestor(node, {"contract_definition", "interface_definition", "struct_definition"})
             enclosing = self._node_name(src_bytes, anc) if anc else None
 
             entry = {
@@ -95,7 +100,7 @@ class MetadataExtractorSolidity:
 
         # collect other inside-contract items
         for node in self._find_nodes(root, {"state_variable_declaration", "event_definition", "modifier_definition"}):
-            anc = self._find_ancestor(node, {"contract_definition", "interface_definition"})
+            anc = self._find_ancestor(node, {"contract_definition", "interface_definition", "struct_definition"})
             enclosing = self._node_name(src_bytes, anc) if anc else None
             txt = self._decode(src_bytes, node).strip()
             doc, ds, de = self._leading_docstring(src_bytes, comments, node)
@@ -160,7 +165,7 @@ class MetadataExtractorSolidity:
         imports = list(dict.fromkeys(imports)) if imports else None
 
         classes = []
-        for m in re.finditer(r'(?m)^\s*(contract|interface)\s+([A-Za-z_]\w*)', src_text):
+        for m in re.finditer(r'(?m)^\s*(contract|interface|struct)\s+([A-Za-z_]\w*)', src_text):
             kind, name = m.group(1), m.group(2)
             start_line = src_text[:m.start()].count("\n") + 1
             classes.append({

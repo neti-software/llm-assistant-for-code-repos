@@ -12,6 +12,7 @@ from qdrant_client.models import (
     Filter,
     FieldCondition,
     MatchValue,
+    MatchAny
 )
 
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
@@ -78,7 +79,7 @@ class QdrantVectorDB:
             query_code_vector: np.ndarray,
             query_doc_vector: np.ndarray,
             top_k: int = 5,
-            filter_conditions: Optional[Dict[str, Union[str, int, float, bool]]] = None,
+            filter_conditions: Optional[Dict[str, Union[str, int, float, bool, list]]] = None,
             include_payload: bool = True,
     ):
 
@@ -276,10 +277,14 @@ class QdrantVectorDB:
             )
 
     @staticmethod
-    def _build_eq_filter(filters: Dict[str, Union[str, int, float, bool]]) -> Filter:
-        return Filter(
-            must=[FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()]
-        )
+    def _build_eq_filter(filters: Dict[str, Union[str, int, float, bool, list]]) -> Filter:
+        conds = []
+        for k, v in filters.items():
+            if isinstance(v, (list, tuple)):
+                conds.append(FieldCondition(key=k, match=MatchAny(any=list(v))))
+            else:
+                conds.append(FieldCondition(key=k, match=MatchValue(value=v)))
+        return Filter(must=conds)
 
     def erase_database(self) -> None:
         """
