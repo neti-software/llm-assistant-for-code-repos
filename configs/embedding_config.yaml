@@ -1,29 +1,15 @@
-# embedding.yaml
-
 text:
-  type: local              # or "cloud"
-  model_name: BAAI/bge-large-en-v1.5
-
-  # --- Local options ---
-  # cache_dir: ./cache/text
-  # max_length: 8192
-  device: cuda:0
-
-  # --- Cloud options ---
-  # provider: openai        # or "cohere", "together", "mcp"
-  # endpoint: http://localhost:8000/embeddings   # for MCP server
-  # api_key: sk-xxx
+  type: cloud
+  dim: 1024
+  provider: voyager
+  model_name: voyage-3-large
+  max_tokens: 32000
+  api_key_path: "configs/voyager_api_key.yaml"
 
 code:
-  type: local              # or "cloud"
-  model_name: jinaai/jina-embeddings-v2-base-code
-
-  # --- Local options ---
-  # cache_dir: ./cache/code
-  # max_length: 2048
-  device: cuda:0
-
-  # --- Cloud options ---
-  # provider: openai
-  # endpoint: http://localhost:8000/embeddings
-  # api_key: sk-xxx
+  type: cloud
+  dim: 1024
+  provider: voyager
+  model_name: voyage-code-3
+  max_tokens: 16000
+  api_key_path: "configs/voyager_api_key.yaml"

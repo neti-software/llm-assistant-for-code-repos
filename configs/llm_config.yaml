@@ -1,7 +1,9 @@
 type: "cloud"
-model: "gpt-5-mini"
-context_length: 400000
-max_completion_tokens: 32000
+provider: "openrouter" # Can be "openai" or "openrouter"
+model: "openrouter/sonoma-sky-alpha"
+context_length: 2000000
+max_completion_tokens: 4000
 tool_choice: "auto"
-path_to_api_key: "configs/openai_key.yaml"
+path_to_api_key: "configs/openrouter_key.yaml"
 path_to_prompt_config: "configs/prompt_config.yaml"
+base_url: "https://openrouter.ai/api/v1"

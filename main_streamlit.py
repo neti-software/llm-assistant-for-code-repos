@@ -1,7 +1,7 @@
 import json
 import streamlit as st
 from typing import Any, Dict, Callable
-from src.llm_module.cloud_llm import CloudLLM
+from src.llm_module.llm_builder import build_llm
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
@@ -54,7 +54,7 @@ class StreamlitChat:
         repos_config = load_yaml("configs/repos_config.yaml")
 
         # init core
-        self.llm = CloudLLM(llm_config)
+        self.llm = build_llm(llm_config)
         manager_qdrant_vector_db = ManagerQdrantVectorDb(
             qdrant_config,
             embedding_config,

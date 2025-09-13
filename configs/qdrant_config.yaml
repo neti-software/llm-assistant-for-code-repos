@@ -1,7 +1,12 @@
 connection:
-  host_url: "http://127.0.0.1:7000"
-  container_name: "qdrant"
+  type: "cloud"
+  #  url: "http://127.0.0.1:7000"
+  url: "https://1d0fa36d-b972-4c19-b464-948ddf9b64fd.eu-west-1-0.aws.cloud.qdrant.io"
+  container_name: "neti"
+  api_key_path: "configs/qdrant_api_key.yaml"
 
 collection_settings:
-  distance_metric: "cosine"                  # Vector similarity metric: cosine, dot, euclid
-  upsert_batch_size: 100
+  distance_metric: "cosine" # Vector similarity metric: cosine, dot, euclid
+  upsert_batch_size: 32
+  embedding_batch_size: 16
+  build_only_code: true
