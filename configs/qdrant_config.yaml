@@ -1,12 +1,19 @@
 connection:
   type: "cloud"
-  #  url: "http://127.0.0.1:7000"
-  url: "https://1d0fa36d-b972-4c19-b464-948ddf9b64fd.eu-west-1-0.aws.cloud.qdrant.io"
+  url: "https://fee49d6d-7402-4c19-adb1-d28ff8722c07.europe-west3-0.gcp.cloud.qdrant.io"
   container_name: "neti"
   api_key_path: "configs/qdrant_api_key.yaml"
 
 collection_settings:
   distance_metric: "cosine" # Vector similarity metric: cosine, dot, euclid
   upsert_batch_size: 32
-  embedding_batch_size: 16
+  embedding_batch_size: 8
   build_only_code: true
+
+search_settings:
+  use_reranker: true
+  top_k_multiply: 3  # Expansion factor for initial vector search.
+                     # If the LLM asks for top_n=5:
+                     #   1. Vector DB search actually retrieves top_n * top_k_multiply = 15 hits.
+                     #   2. These 15 are passed to the reranker.
+                     #   3. The reranker trims back to the final top_n=5 results.

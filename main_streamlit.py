@@ -47,6 +47,7 @@ class StreamlitChat:
         # load configs
         llm_config = load_yaml("configs/llm_config.yaml")
         embedding_config = load_yaml("configs/embedding_config.yaml")
+        reranker_config = load_yaml("configs/reranker_config.yaml")
         qdrant_config = load_yaml("configs/qdrant_config.yaml")
         conversation_history_config = load_yaml("configs/conversation_history_config.yaml")
         repo_metadata_manager_config = load_yaml("configs/json_schema/ast/metadata_schema.json")
@@ -56,12 +57,13 @@ class StreamlitChat:
         # init core
         self.llm = build_llm(llm_config)
         manager_qdrant_vector_db = ManagerQdrantVectorDb(
-            qdrant_config,
-            embedding_config,
-            repo_metadata_manager_config,
-            ignore_patterns_config,
+            config=qdrant_config,
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
+            repo_metadata_manager_config=repo_metadata_manager_config,
+            ignore_patterns_config=ignore_patterns_config,
         )
-        self.tool_manager = ToolManager(repos_config["path_to_repos"]) # TODO , what to do with that path?
+        self.tool_manager = ToolManager(repos_config["path_to_repos"], ignore_patterns_config) # TODO , what to do with that path?
         self.tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
         self.tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
         self.conversation_history = ConversationHistory(conversation_history_config)

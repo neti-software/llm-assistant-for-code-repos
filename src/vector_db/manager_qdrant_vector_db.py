@@ -1,24 +1,23 @@
-import subprocess
-import shlex
-import time
-import requests
 import glob
 import os
-from heapq import nlargest
 from src.ast.metadata_extractor_manager import MetadataExtractorManager
-from src.vector_db.helpers_vector_db import *
+from src.vector_db.helpers_vector_db import assemble_function_docs_generic
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
+from src.reranker_module.voyager_reranker import VoyagerReranker
 from src.vector_db.qdrant_vector_db import QdrantVectorDB
 from src.utils.profiler import execution_profiler
 from qdrant_client.http import models as rest
+from pathlib import Path
+from typing import Dict, Any
 from tqdm import tqdm
 
 
 class ManagerQdrantVectorDb:
     def __init__(self, config: Dict[str, Any], embedding_config: dict, repo_metadata_manager_config: dict,
-                 ignore_patterns_config: dict):
+                 reranker_config: dict, ignore_patterns_config: dict):
         self.config = config
         self.embedding_model = EmbeddingBuilder(embedding_config)
+        self.reranker_model = VoyagerReranker(reranker_config)
 
         self.metadata_extractor_manager = MetadataExtractorManager(repo_metadata_manager_config, ignore_patterns_config)
 
@@ -27,62 +26,11 @@ class ManagerQdrantVectorDb:
         self.container_name: str = config["connection"].get("container_name", "qdrant")
         self.build_only_code: bool = config["collection_settings"]["build_only_code"]
 
-        # Derive port from host_url (assume format http://host:port)
-        # self.port: int = int(self.host_url.split(":")[-1])
-
-        # Run Qdrant if needed
-        # self._run_docker()
-        # self._wait_for_ready()
+        # Parse search settings
+        self.use_reranker: bool = config["search_settings"]["use_reranker"]
+        self.top_k_multiply: float = config["search_settings"]["top_k_multiply"]
 
         self._qdrant_vector_db = QdrantVectorDB(config, self.embedding_model)
-
-    def _run_docker(self):
-        """Force remove any existing Qdrant container and restart clean."""
-        print(f"[Qdrant] Nuking old containers and restarting '{self.container_name}' on port {self.port}...")
-
-        # 1. Stop + remove any container with the same name
-        subprocess.run(shlex.split(f"docker stop {self.container_name}"), check=False)
-        subprocess.run(shlex.split(f"docker rm -f {self.container_name}"), check=False)
-
-        # 2. Kill anything else hogging the port (e.g. crashed container or zombie)
-        try:
-            subprocess.run(shlex.split(f"fuser -k {self.port}/tcp"), check=False)
-        except Exception:
-            pass  # ignore if fuser not available
-
-        # 3. Run new one
-        docker_cmd = (
-            f"docker run -d --rm "
-            f"-p {self.port}:6333 "
-            f"--name {self.container_name} "
-            f"qdrant/qdrant"
-        )
-        print(f"[Qdrant] Running: {docker_cmd}")
-        subprocess.run(shlex.split(docker_cmd), check=True)
-        print(f"[Qdrant] Container '{self.container_name}' started fresh on port {self.port}")
-
-    def _wait_for_ready(self, timeout: int = 20):
-        """Wait until Qdrant is responding on HTTP API."""
-        url = f"http://localhost:{self.port}/healthz"
-        print(f"[Qdrant] Waiting for Qdrant to be ready at {url} ...")
-
-        start = time.time()
-        while time.time() - start < timeout:
-            try:
-                r = requests.get(url, timeout=1)
-                if r.status_code == 200:
-                    print("[Qdrant] Ready ✅")
-                    return
-            except Exception:
-                pass
-            time.sleep(1)
-
-        raise TimeoutError("Qdrant did not become ready in time.")
-
-    def stop(self):
-        """Stop the Qdrant container."""
-        print(f"[Qdrant] Stopping container {self.container_name} ...")
-        subprocess.run(shlex.split(f"docker stop {self.container_name}"), check=False)
 
     @execution_profiler
     def create_vector_db_from_dir(self, root_repos_dir):
@@ -123,6 +71,10 @@ class ManagerQdrantVectorDb:
                                                         positive_filter_conditions=positive_filter_conditions,
                                                         negative_filter_conditions=negative_filter_conditions)
 
+        if self.use_reranker:
+            initial_top_k = top_k
+            top_k = int(top_k * self.top_k_multiply)
+
         query_code_vector = self.embedding_model.code_embed(query)
         if per_field:
             query_doc_vector = self.embedding_model.text_embed(query)
@@ -137,7 +89,7 @@ class ManagerQdrantVectorDb:
                 collection_name=cname,
                 query_code_vector=query_code_vector,
                 query_doc_vector=query_doc_vector,
-                top_k=top_k,  # local top_k per collection
+                top_k=top_k,
             )
 
             # 4) Collect results with metadata
@@ -180,14 +132,22 @@ class ManagerQdrantVectorDb:
                     if len(top_results) == top_k:
                         break
 
+
+        minimalized_results = self._minimalize_rag_results(top_results)
+        if self.use_reranker:
+            minimalized_results = self.reranker_model.rerank_hits(query=query,
+                                                                  hits=minimalized_results,
+                                                                  top_k=initial_top_k)
+
         # 6) Print nicely
-        print(f"\n🏆 Global Top {top_k} Results:")
-        for rank, hit in enumerate(top_results, start=1):
+        print(f"\n🏆 Global Top {initial_top_k} Results:")
+        for rank, hit in enumerate(minimalized_results, start=1):
             sc = hit["score"]
             sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={sc_txt})")
+            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
 
-        return self._minimalize_rag_results(top_results)
+
+        return minimalized_results
 
     @execution_profiler
     def search_project_readme(self, query: str, top_k: int = 3):
@@ -201,6 +161,10 @@ class ManagerQdrantVectorDb:
             return []
 
         query_code_vector = self.embedding_model.code_embed(query)
+
+        if self.use_reranker:
+            initial_top_k = top_k
+            top_k = int(top_k * self.top_k_multiply)
 
         all_hits = []
         # 3) Loop through collections
@@ -251,14 +215,20 @@ class ManagerQdrantVectorDb:
                 if len(top_results) == top_k:
                     break
 
+        minimalized_results = self._minimalize_rag_results(top_results)
+        if self.use_reranker:
+            minimalized_results = self.reranker_model.rerank_hits(query=query,
+                                                                  hits=minimalized_results,
+                                                                  top_k=initial_top_k)
+
         # 6) Print nicely
-        print(f"\n🏆 Global Top {top_k} Results:")
-        for rank, hit in enumerate(top_results, start=1):
+        print(f"\n🏆 Global Top {initial_top_k} Results:")
+        for rank, hit in enumerate(minimalized_results, start=1):
             sc = hit["score"]
             sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['collection']}] {hit['field']} = {hit['value']}  (score={sc_txt})")
+            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
 
-        return self._minimalize_rag_results(top_results)
+        return minimalized_results
 
     @staticmethod
     def _minimalize_rag_results(res, full_mode: bool = False):  # TODO move it, fix that double emtadata
