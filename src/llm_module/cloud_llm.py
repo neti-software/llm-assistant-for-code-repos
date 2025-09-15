@@ -1,9 +1,10 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import json
 import os
 
 from src.llm_module.llm_abc import LLMABC
 from openai import OpenAI
+from langsmith.wrappers import wrap_openai  # minimal tracing for OpenAI client
 from src.utils.profiler import execution_profiler
 from src.utils.helper import load_yaml
 
@@ -123,6 +124,12 @@ class CloudLLM(LLMABC):
             client_kwargs["base_url"] = config["base_url"]
 
         self.client = OpenAI(**client_kwargs)
+        # Enable LangSmith tracing for OpenAI calls (minimal, env-driven)
+        try:
+            self.client = wrap_openai(self.client)
+        except Exception:
+            # If wrapping fails for any reason, continue without tracing
+            pass
         # Make credentials visible to PromptLayer provider wrappers
         try:
             os.environ.setdefault("OPENAI_API_KEY", api_key)
@@ -241,7 +248,7 @@ class CloudLLM(LLMABC):
             }
 
     @execution_profiler
-    def generate(self, user_input: str) -> str:
+    def generate(self, user_input: str) -> Tuple[bool, Dict[str, Any]]:
         """
         Generate a response using OpenAI Chat Completions API.
 
