@@ -2,11 +2,18 @@ from pathlib import Path
 from typing import Dict
 import fnmatch
 from src.utils.profiler import execution_profiler
-from src.ast.metadata_extractor_python import MetadataExtractorPython
-from src.ast.metadata_extractor_go import MetadataExtractorGo
-from src.ast.metadata_extractor_javascript import MetadataExtractorJS
-from src.ast.metadata_extractor_rust import MetadataExtractorRust
 from src.ast.metadata_validator import MetadataValidator
+from src.ast.metadata_extractor_python import MetadataExtractorPython
+from src.ast.metadata_extractor_ipynb import MetadataExtractorIpynb
+from src.ast.metadata_extractor_go import MetadataExtractorGo
+from src.ast.metadata_extractor_rust import MetadataExtractorRust
+from src.ast.metadata_extractor_javascript import MetadataExtractorJS
+from src.ast.metadata_extractor_typescript import MetadataExtractorTS
+from src.ast.metadata_extractor_cpp import MetadataExtractorCAndCpp
+from src.ast.metadata_extractor_headers import MetadataExtractorHeaders
+from src.ast.metadata_extractor_ruby import MetadataExtractorRuby
+from src.ast.metadata_extractor_solidity import MetadataExtractorSolidity
+from src.ast.metadata_extractor_markdown import MetadataExtractorMarkdown
 
 
 class MetadataExtractorManager:
@@ -16,11 +23,22 @@ class MetadataExtractorManager:
         # simple extension -> extractor map
         self._extractor_by_ext = {
             ".py": MetadataExtractorPython(),
+            ".ipynb": MetadataExtractorIpynb(),
             ".go": MetadataExtractorGo(),
+            ".rs": MetadataExtractorRust(),
             ".js": MetadataExtractorJS(),
             ".mjs": MetadataExtractorJS(),
             ".cjs": MetadataExtractorJS(),
-            ".rs": MetadataExtractorRust(),
+            ".ts": MetadataExtractorTS(),
+            ".cpp": MetadataExtractorCAndCpp(),
+            ".c": MetadataExtractorCAndCpp(),
+            ".h": MetadataExtractorHeaders(),
+            ".hpp": MetadataExtractorHeaders(),
+            ".tsx": MetadataExtractorTS(),
+            ".jsx": MetadataExtractorJS(),
+            ".rb": MetadataExtractorRuby(),
+            ".sol": MetadataExtractorSolidity(),
+            ".md": MetadataExtractorMarkdown()
         }
 
         self._ignore_patterns = [p for v in ignore_patterns_config.values() for p in v]

@@ -12,3 +12,4 @@ tiktoken
 promptlayer
 python-dotenv
 voyageai
+nbformat

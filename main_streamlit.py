@@ -6,6 +6,7 @@ from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
 from src.utils.helper import load_yaml
+from src.utils.profiler import execution_profiler, time_it
 
 st.set_page_config(page_title="LLM Chat", layout="wide")
 
@@ -13,7 +14,7 @@ st.set_page_config(page_title="LLM Chat", layout="wide")
 # ---------- session state ----------
 def ensure_session_state() -> None:
     if "messages" not in st.session_state:
-        st.session_state["messages"] = []   # list[(role, msg)]
+        st.session_state["messages"] = []  # list[(role, msg)]
     if "compact" not in st.session_state:
         st.session_state["compact"] = False
     if "chat" not in st.session_state:
@@ -27,14 +28,17 @@ def _as_json(obj: Any) -> str:
     except Exception:
         return str(obj)
 
+
 def _md_code(lang: str, content: str) -> str:
     return f"```{lang}\n{content}\n```"
+
 
 def _render_llm_content(resp: Any) -> str:
     # If response is a dict from your LLM tool-calling format, show its 'content'
     if isinstance(resp, dict) and "content" in resp:
         return str(resp["content"])
     return _as_json(resp) if isinstance(resp, (dict, list)) else str(resp)
+
 
 def _short(obj: Any, limit: int = 4000) -> str:
     text = _as_json(obj) if isinstance(obj, (dict, list)) else str(obj)
@@ -61,8 +65,9 @@ class StreamlitChat:
             repo_metadata_manager_config,
             ignore_patterns_config,
         )
-        self.tool_manager = ToolManager(repos_config["path_to_repos"]) # TODO , what to do with that path?
+        self.tool_manager = ToolManager(repos_config["path_to_repos"])  # TODO , what to do with that path?
         self.tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
+        self.tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
         self.conversation_history = ConversationHistory(conversation_history_config)
 
     # unified logger -> terminal + live UI
@@ -70,6 +75,8 @@ class StreamlitChat:
         print(msg)
         live_log(msg, role)
 
+    @time_it
+    @execution_profiler
     def run_llm_loop(self, live_log: Callable[[str, str], None]) -> Dict[str, Any]:
         iteration = 0
         while True:
@@ -117,6 +124,8 @@ class StreamlitChat:
         self.conversation_history.add_model_response(resp)
         self.conversation_history.save()
 
+        execution_profiler.print_info()
+        execution_profiler.clean()
         return resp
 
 
@@ -129,11 +138,13 @@ with st.sidebar:
         "Compact mode (hide traces)", value=st.session_state["compact"]
     )
 
+
     # --- Reset chat ---
     def _reset_chat():
         st.session_state["messages"] = []
         # new StreamlitChat -> new ConversationHistory inside
         st.session_state["chat"] = StreamlitChat()
+
 
     if st.button("Reset chat", type="primary", help="Clear conversation and start fresh"):
         _reset_chat()
@@ -167,6 +178,7 @@ if prompt:
     live_area = trace_box.empty()
     logs: list[tuple[str, str]] = []  # [(role, msg)]
 
+
     def live_log(msg: str, role: str = "trace") -> None:
         # append and render incrementally
         logs.append((role, msg))
@@ -178,6 +190,7 @@ if prompt:
         live_area.markdown("\n\n".join(rendered))
         # persist each step so it remains after rerun
         st.session_state["messages"].append((role, msg))
+
 
     # run synchronously for true streaming
     with st.spinner("Working..."):

@@ -3,6 +3,7 @@ from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
 from src.utils.helper import load_yaml
+from src.utils.profiler import execution_profiler, time_it
 
 from colorama import Fore, Style, init
 
@@ -32,12 +33,13 @@ def build_core():
             if st.get("active"):
                 yaml_name = st.get("yaml_prompt_name", "unknown")
                 pl_name = st.get("prompt_name", "unknown")
-                
+
                 if st.get("template_fetched") and st.get("first_line"):
                     print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
                     print(f"{Fore.GREEN}Prompt preview:{Style.RESET_ALL} {st['first_line']}")
                 elif st.get("template_fetched"):
-                    print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name} (no preview)")
+                    print(
+                        f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name} (no preview)")
                 else:
                     print(f"{Fore.YELLOW}PromptLayer connected:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
                     if st.get("prompt_fetch_error"):
@@ -48,13 +50,14 @@ def build_core():
                 reasons = []
                 if not st.get("import_ok", True):
                     reasons.append("promptlayer not installed")
-                    
+
                 if not st.get("key_present", True):
                     reasons.append("PROMPT_LAYER_API_KEY missing in .env")
                 if st.get("client_init_error"):
                     reasons.append(f"client init error: {st['client_init_error']}")
                 reason_text = "; ".join(reasons) or "unknown"
-                print(f"{Fore.YELLOW}PromptLayer disabled:{Style.RESET_ALL} {reason_text}. Using YAML prompt '{yaml_name}' instead.")
+                print(
+                    f"{Fore.YELLOW}PromptLayer disabled:{Style.RESET_ALL} {reason_text}. Using YAML prompt '{yaml_name}' instead.")
         else:
             # Backward-compatible minimal indicator
             pl_first_line = getattr(llm, "get_promptlayer_prompt_first_line", lambda: None)()
@@ -69,8 +72,9 @@ def build_core():
         ignore_patterns_config,
     )
 
-    tool_manager = ToolManager(repos_config["path_to_repos"]) # TODO , what to do with that path?
+    tool_manager = ToolManager(repos_config["path_to_repos"])  # TODO , what to do with that path?
     tool_manager.add_tool_pointer("rag_search", manager_qdrant_vector_db.search)
+    tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
 
     conversation_history = ConversationHistory(conversation_history_config)
 
@@ -78,6 +82,7 @@ def build_core():
     return llm, tool_manager, conversation_history
 
 
+@time_it
 def llm_loop(llm, tool_manager: ToolManager, conversation_history: ConversationHistory) -> dict:
     """Run a single LLM self-loop until it produces a final response, with step tracing."""
     iteration = 0
@@ -103,6 +108,7 @@ def llm_loop(llm, tool_manager: ToolManager, conversation_history: ConversationH
         iteration += 1
 
 
+@execution_profiler
 def chat_loop(user_question, llm, tool_manager, conversation_history):
     """Add a user question, run loop, and return final model response."""
     conversation_history.add_user_question(user_question)
@@ -123,6 +129,9 @@ def main():
 
         resp = chat_loop(user_question, llm, tool_manager, conversation_history)
         print(f"{Fore.MAGENTA}FINAL RESPONSE:{Style.RESET_ALL} {resp}\n")
+
+        execution_profiler.print_info()
+        execution_profiler.clean()
 
 
 if __name__ == "__main__":

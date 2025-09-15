@@ -1,6 +1,4 @@
 import logging
-import os
-
 from src.utils.helper import load_yaml
 
 
@@ -58,12 +56,9 @@ def set_logging_level(logger: logging.Logger, level: int) -> None:
 
 
 # ---------------- Global default logger ----------------
-try:
-    cfg = load_yaml("/home/dawid/Desktop/Neti/llm-assistant-for-code-repos/configs/logger_config.yaml")  # TODO
-    logger_cfg = cfg.get("logger", {})
-    logger = setup_logger(
-        name=logger_cfg["name"],
-        level=_level_from_str(logger_cfg["level"]))
-except FileNotFoundError:
-    # fallback if YAML is missing
-    logger = setup_logger()
+cfg = load_yaml("configs/logger_config.yaml")  # TODO
+logger_cfg = cfg.get("logger", {})
+logger = setup_logger(
+    name=logger_cfg["name"],
+    level=_level_from_str(logger_cfg["level"]))
+
