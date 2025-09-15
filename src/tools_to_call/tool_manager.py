@@ -8,8 +8,9 @@ from src.tools_to_call.search_files_with_grep import search_files_with_grep
 
 
 class ToolManager:
-    def __init__(self, path_to_repos: str):
+    def __init__(self, path_to_repos: str, ignore_patterns_config: dict):
         self._path_to_repos = Path(path_to_repos)
+        self._ignore_patterns = [p for v in ignore_patterns_config.values() for p in v]
 
         # Registry of available tools
         self.tools: Dict[str, Callable[..., Any]] = {
@@ -74,6 +75,11 @@ class ToolManager:
         if action in self._tools_requiring_root:
             llm_args["root"] = self._path_to_repos
 
+        # inject ignore_patterns specifically for fetch_project_structure
+        if action == "fetch_project_structure":
+            llm_args["ignore_patterns"] = self._ignore_patterns
+
+        # only pass expected args
         call_args = {}
         for param_name in func_params.keys():
             if param_name in llm_args:
