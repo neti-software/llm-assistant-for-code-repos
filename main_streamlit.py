@@ -6,6 +6,7 @@ from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
 from src.utils.helper import load_yaml
+from src.utils.profiler import time_it
 
 st.set_page_config(page_title="LLM Chat", layout="wide")
 
@@ -71,6 +72,7 @@ class StreamlitChat:
         print(msg)
         live_log(msg, role)
 
+    @time_it
     def run_llm_loop(self, live_log: Callable[[str, str], None]) -> Dict[str, Any]:
         iteration = 0
         while True:

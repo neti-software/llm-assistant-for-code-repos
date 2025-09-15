@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Tuple, Union
+
+from src.utils.logger import logger
 
 # -----------------------------
 # File read cache (per repo/file)
@@ -16,11 +18,15 @@ def _read_lines(repo_root: Path, rel_path: Union[str, Path]) -> List[str]:
     key = (rr, rp)
 
     if key in _FILE_CACHE:
+        logger.debug("_read_lines cache hit for %s %s", rr, rp)
         return _FILE_CACHE[key]
 
+    logger.debug("_read_lines cache miss for %s %s", rr, rp)
     try:
         lines = (Path(rr) / rp).read_text(encoding="utf-8", errors="ignore").splitlines()
-    except Exception:
+        logger.debug("_read_lines read %d lines for %s", len(lines), rp)
+    except Exception as e:
+        logger.warning("_read_lines failed to read %s: %s", rp, e)
         lines = []
 
     _FILE_CACHE[key] = lines
@@ -38,20 +44,25 @@ def build_function_snippet(
     """
     lines = _read_lines(repo_root, rel_path)
     if not lines:
+        logger.debug("build_function_snippet: no lines for %s in %s", rel_path, repo_root)
         return ""
 
     s = int(func_meta.get("start_line_code") or 0)
     e = int(func_meta.get("end_line_code") or 0)
     if s <= 0 or e <= 0 or e < s:
+        logger.debug("build_function_snippet: invalid line range s=%s e=%s for %s", s, e, rel_path)
         return ""
 
     # clamp to file bounds (1-based → 0-based slice)
     s0 = max(1, s)
     e0 = min(len(lines), e)
     if e0 < s0:
+        logger.debug("build_function_snippet: clamped range empty s0=%s e0=%s for %s", s0, e0, rel_path)
         return ""
 
     block = lines[s0 - 1 : e0]  # slice already copies
+    logger.debug("build_function_snippet: extracted %d lines (global %d..%d -> local 1..%d) from %s",
+                 len(block), s, e, e0 - s0 + 1, rel_path)
 
     # remove docstring if its span (global line numbers) overlaps this block
     ds = func_meta.get("start_line_doc")
@@ -61,10 +72,14 @@ def build_function_snippet(
         rel_e = de - s0
         # Only delete if strictly within the block
         if 0 <= rel_s <= rel_e < len(block):
+            logger.debug("build_function_snippet: removing docstring lines rel %d..%d from block of %d lines",
+                         rel_s, rel_e, len(block))
             del block[rel_s : rel_e + 1]
 
     # Preserve original indentation; do not strip trailing spaces (keeps fidelity)
-    return "\n".join(block)
+    snippet = "\n".join(block)
+    logger.debug("build_function_snippet: returning snippet length=%d", len(snippet))
+    return snippet
 
 
 # ----------- generic class metadata attach -----------
@@ -80,10 +95,13 @@ def _find_class_meta_generic(
     enc = func_meta.get("enclosing_class")
     classes = file_meta.get("classes")
     if not enc or not isinstance(classes, list):
+        logger.debug("_find_class_meta_generic: no enclosing_class or no classes list")
         return {}
     for cls in classes:
         if cls.get("symbol_name") == enc or cls.get("name") == enc:
+            logger.debug("_find_class_meta_generic: matched class %s for enclosing %s", cls.get("name") or cls.get("symbol_name"), enc)
             return cls
+    logger.debug("_find_class_meta_generic: no class match for %s", enc)
     return {}
 
 
@@ -100,9 +118,11 @@ def assemble_function_docs_generic(
     """
     root = Path(repo_root).resolve()
     docs: List[Dict[str, Any]] = []
+    logger.info("assemble_function_docs_generic: processing repo_root=%s with %d files", root, len(metadata_map))
 
     for rel_path, file_meta in metadata_map.items():
         if not isinstance(file_meta, dict):
+            logger.debug("assemble_function_docs_generic: skipping non-dict metadata for %s", rel_path)
             continue
 
         global_meta = _extract_global_meta(file_meta)
@@ -110,17 +130,18 @@ def assemble_function_docs_generic(
         # --- functions ---
         funcs = file_meta.get("functions", [])
         if isinstance(funcs, list) and funcs:
-            docs.extend(
-                _build_function_docs(root, rel_path, funcs, global_meta, file_meta)
-            )
+            added = _build_function_docs(root, rel_path, funcs, global_meta, file_meta)
+            docs.extend(added)
+            logger.debug("assemble_function_docs_generic: added %d function docs from %s", len(added), rel_path)
 
         # --- classes ---
         classes = file_meta.get("classes", [])
         if isinstance(classes, list) and classes:
-            docs.extend(
-                _build_class_docs(root, rel_path, classes, global_meta, file_meta)
-            )
+            added = _build_class_docs(root, rel_path, classes, global_meta, file_meta)
+            docs.extend(added)
+            logger.debug("assemble_function_docs_generic: added %d class docs from %s", len(added), rel_path)
 
+    logger.info("assemble_function_docs_generic: total docs built=%d", len(docs))
     return docs
 
 
@@ -147,12 +168,15 @@ def _build_function_docs(
 ) -> List[Dict[str, Any]]:
     """Build documents for all functions in a file."""
     docs: List[Dict[str, Any]] = []
+    logger.debug("_build_function_docs: building for %s functions=%d", rel_path, len(funcs))
     for func_meta in funcs:
         if not isinstance(func_meta, dict):
+            logger.debug("_build_function_docs: skipping non-dict func_meta in %s", rel_path)
             continue
 
         code_snippet = build_function_snippet(repo_root, rel_path, func_meta)
         if not code_snippet.strip():
+            logger.debug("_build_function_docs: empty snippet for function %s in %s, skipping", func_meta.get("symbol_name") or func_meta.get("name"), rel_path)
             continue
 
         class_meta = _find_class_meta_generic(file_meta, func_meta)
@@ -160,6 +184,7 @@ def _build_function_docs(
 
         doc = _make_function_doc(func_meta, code_snippet, metadata)
         docs.append(doc)
+        logger.debug("_build_function_docs: appended doc for function %s in %s", func_meta.get("symbol_name") or func_meta.get("name"), rel_path)
 
     return docs
 
@@ -214,12 +239,15 @@ def _build_class_docs(
     """
     docs: List[Dict[str, Any]] = []
     file_docstring = (file_meta.get("docstring") or "").strip()
+    logger.debug("_build_class_docs: processing %s classes=%d", rel_path, len(classes))
 
     for class_meta in classes:
         if not isinstance(class_meta, dict):
+            logger.debug("_build_class_docs: skipping non-dict class_meta in %s", rel_path)
             continue
 
         class_name = class_meta.get("symbol_name") or class_meta.get("name") or "UnknownClass"
+        logger.debug("_build_class_docs: building class %s", class_name)
 
         # --- collect code snippets from all methods ---
         method_snippets: List[str] = []
@@ -265,5 +293,6 @@ def _build_class_docs(
             "doc_to_embedded": merged_doc,
             "metadata": metadata,
         })
+        logger.debug("_build_class_docs: appended class doc %s with %d methods", class_name, len(method_snippets))
 
     return docs

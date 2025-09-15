@@ -3,6 +3,7 @@ from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
 from src.utils.helper import load_yaml
+from src.utils.profiler import time_it
 
 from colorama import Fore, Style, init
 
@@ -79,6 +80,7 @@ def build_core():
     return llm, tool_manager, conversation_history
 
 
+@time_it
 def llm_loop(llm, tool_manager: ToolManager, conversation_history: ConversationHistory) -> dict:
     """Run a single LLM self-loop until it produces a final response, with step tracing."""
     iteration = 0
