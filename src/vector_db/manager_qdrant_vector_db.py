@@ -34,6 +34,8 @@ class ManagerQdrantVectorDb:
         # Parse search settings
         self.use_reranker: bool = config["search_settings"]["use_reranker"]
         self.top_k_multiply: float = config["search_settings"]["top_k_multiply"]
+        logger.debug("Search settings loaded: use_reranker=%s top_k_multiply=%.2f",
+                    self.use_reranker, self.top_k_multiply)
 
         self._qdrant_vector_db = QdrantVectorDB(config, self.embedding_model)
 
@@ -86,9 +88,11 @@ class ManagerQdrantVectorDb:
                                                         negative_filter_conditions=negative_filter_conditions)
         logger.debug("Filtered collections count: %d", len(filtered_collections))
 
+        initial_top_k = top_k
         if self.use_reranker:
-            initial_top_k = top_k
+            logger.debug("Using reranker: initial_top_k=%d multiply=%.2f", top_k, self.top_k_multiply)
             top_k = int(top_k * self.top_k_multiply)
+            logger.debug("Adjusted top_k from %d -> %d", initial_top_k, top_k)
 
         query_code_vector = self.embedding_model.code_embed(query)
         logger.debug("Computed code embedding for query (length=%d)", len(query_code_vector) if hasattr(query_code_vector, "__len__") else -1)
@@ -179,22 +183,26 @@ class ManagerQdrantVectorDb:
 
         # 1) Get all collections
         collections = self._qdrant_vector_db.qdrant_client.get_collections().collections
+        logger.debug("Retrieved %d collections from Qdrant for readme search", len(collections) if collections is not None else 0)
         if not collections:
-            print("⚠️ No collections found in Qdrant.")
+            logger.warning("No collections found in Qdrant (readme search).")
             return []
 
         query_code_vector = self.embedding_model.code_embed(query)
         logger.debug("Computed code embedding for query in readme search (length=%d)",
                      len(query_code_vector) if hasattr(query_code_vector, "__len__") else -1)
 
+        initial_top_k = top_k
         if self.use_reranker:
-            initial_top_k = top_k
+            logger.debug("Using reranker: initial_top_k=%d multiply=%.2f", top_k, self.top_k_multiply)
             top_k = int(top_k * self.top_k_multiply)
+            logger.debug("Adjusted top_k from %d -> %d", initial_top_k, top_k)
 
         all_hits = []
         # 3) Loop through collections
         for collection in collections:
             cname = collection.name
+            logger.debug("Searching README in collection: %s", cname)
             hits = self._qdrant_vector_db.search_collection(
                 collection_name=cname,
                 query_code_vector=query_code_vector,

@@ -1,0 +1,5 @@
+model_name: rerank-2.5
+api_key_path: "configs/voyager_api_key.yaml"
+prompt: "Prefer code and short runnable examples for implementation questions, prefer docs for design/architecture queries, and demote duplicates and build artifacts"
+
+
