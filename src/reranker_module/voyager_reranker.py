@@ -45,7 +45,8 @@ class VoyagerReranker:
         collection = h.get("collection", "<collection>")
         field = h.get("field", "<field>")
         value = h.get("value", "<missing>")
-        logger.debug("_hit_to_document: falling back to collection/field/value for collection=%s field=%s", collection, field)
+        logger.debug("_hit_to_document: falling back to collection/field/value for collection=%s field=%s", collection,
+                     field)
         return f"[{collection}] {field}: {value}"
 
     @time_it
@@ -65,7 +66,8 @@ class VoyagerReranker:
         - Replace their `score` with the reranker score.
         - Return exactly `top_k` hits sorted by rerank score, preserving dict structure.
         """
-        logger.info("rerank_hits called hits=%d top_k=%s truncation=%s", len(hits) if hits is not None else 0, top_k, truncation)
+        logger.info("rerank_hits called hits=%d top_k=%s truncation=%s", len(hits) if hits is not None else 0, top_k,
+                    truncation)
         if not hits:
             logger.debug("rerank_hits: empty hits -> returning []")
             return []

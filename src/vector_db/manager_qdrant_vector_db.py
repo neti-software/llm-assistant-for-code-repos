@@ -30,12 +30,11 @@ class ManagerQdrantVectorDb:
         logger.info("Connection parsed. host_url=%s container_name=%s build_only_code=%s",
                     self.host_url, self.container_name, self.build_only_code)
 
-
         # Parse search settings
         self.use_reranker: bool = config["search_settings"]["use_reranker"]
         self.top_k_multiply: float = config["search_settings"]["top_k_multiply"]
         logger.debug("Search settings loaded: use_reranker=%s top_k_multiply=%.2f",
-                    self.use_reranker, self.top_k_multiply)
+                     self.use_reranker, self.top_k_multiply)
 
         self._qdrant_vector_db = QdrantVectorDB(config, self.embedding_model)
 
@@ -55,7 +54,7 @@ class ManagerQdrantVectorDb:
             logger.debug("Metadata extracted for %s: %d entries", repo_root.name, len(metadata_map))
             docs = assemble_function_docs_generic(metadata_map, repo_root=repo_root)
             logger.debug("Assembled docs for %s: %d docs", repo_root.name, len(docs))
-            self._qdrant_vector_db.collection_name = repo_root.name # TODO
+            self._qdrant_vector_db.collection_name = repo_root.name  # TODO
             if not docs:
                 logger.warning("No docs assembled for repo %s. Skipping.", repo_root)
                 continue
@@ -72,7 +71,7 @@ class ManagerQdrantVectorDb:
     def search(self, query: str, top_k: int = 3, per_field: bool = False,
                positive_filter_conditions: dict = None,
                negative_filter_conditions: dict = None,
-               diversity: bool = False): # TODO change to number like give at least 3 diversity repo
+               diversity: bool = False):  # TODO change to number like give at least 3 diversity repo
         logger.info("Search called. query=%s top_k=%d per_field=%s diversity=%s",
                     query, top_k, per_field, diversity)
 
@@ -95,7 +94,8 @@ class ManagerQdrantVectorDb:
             logger.debug("Adjusted top_k from %d -> %d", initial_top_k, top_k)
 
         query_code_vector = self.embedding_model.code_embed(query)
-        logger.debug("Computed code embedding for query (length=%d)", len(query_code_vector) if hasattr(query_code_vector, "__len__") else -1)
+        logger.debug("Computed code embedding for query (length=%d)",
+                     len(query_code_vector) if hasattr(query_code_vector, "__len__") else -1)
         if per_field:
             query_doc_vector = self.embedding_model.text_embed(query)
             logger.debug("Computed text embedding for query (per_field=True)")
@@ -158,7 +158,6 @@ class ManagerQdrantVectorDb:
                     if len(top_results) == top_k:
                         break
 
-
         minimalized_results = self._minimalize_rag_results(top_results)
         if self.use_reranker:
             minimalized_results = self.reranker_model.rerank_hits(query=query,
@@ -183,7 +182,8 @@ class ManagerQdrantVectorDb:
 
         # 1) Get all collections
         collections = self._qdrant_vector_db.qdrant_client.get_collections().collections
-        logger.debug("Retrieved %d collections from Qdrant for readme search", len(collections) if collections is not None else 0)
+        logger.debug("Retrieved %d collections from Qdrant for readme search",
+                     len(collections) if collections is not None else 0)
         if not collections:
             logger.warning("No collections found in Qdrant (readme search).")
             return []
@@ -266,7 +266,6 @@ class ManagerQdrantVectorDb:
         logger.info("Top README results prepared. returning %d items", len(top_results))
         return minimalized_results
 
-
     @staticmethod
     def _minimalize_rag_results(res, full_mode: bool = False):  # TODO move it, fix that double emtadata
         formated_results = []
@@ -327,7 +326,8 @@ class ManagerQdrantVectorDb:
         self._qdrant_vector_db.erase_database()
 
     @staticmethod
-    def _filter_collections(collections, positive_filter_conditions=None, negative_filter_conditions=None): # TODO make it better
+    def _filter_collections(collections, positive_filter_conditions=None,
+                            negative_filter_conditions=None):  # TODO make it better
         """
         Filter Qdrant collections by project name.
         - conditions must look like {"project": "ecodash"} or {"project": ["ecodash", "acbc"]}

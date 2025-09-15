@@ -38,7 +38,3 @@ class VoyagerEmbedding(EmbeddingABC):
     @staticmethod
     def _ensure_list(x: Union[str, List[str]]) -> List[str]:
         return [x] if isinstance(x, str) else list(x)
-
-
-
-
