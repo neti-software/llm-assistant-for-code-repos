@@ -6,6 +6,7 @@ from src.utils.helper import load_yaml
 from src.utils.profiler import execution_profiler, time_it
 
 from colorama import Fore, Style, init
+from langsmith.run_helpers import trace  # chain-level parent trace per chat turn
 
 # Initialize colorama
 init(autoreset=True)
@@ -129,7 +130,19 @@ def main():
             print(f"{Fore.CYAN}Exiting...{Style.RESET_ALL}")
             break
 
-        resp = chat_loop(user_question, llm, tool_manager, conversation_history)
+        # Group all nested LLM/tool calls under one parent trace
+        with trace(
+            "RepoAssistant Chat Turn",
+            run_type="chain",
+            tags=["cli", "repo-assistant"],
+            metadata={"question": user_question},
+        ) as run:
+            resp = chat_loop(user_question, llm, tool_manager, conversation_history)
+            # Record final output on the parent run (best-effort)
+            try:
+                run.end(outputs={"final_response": resp})
+            except Exception:
+                pass
         print(f"{Fore.MAGENTA}FINAL RESPONSE:{Style.RESET_ALL} {resp}\n")
 
         execution_profiler.print_info()

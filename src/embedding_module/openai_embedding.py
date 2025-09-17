@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Union
 from openai import OpenAI
+from langsmith.wrappers import wrap_openai  # minimal tracing for OpenAI embeddings
 import tiktoken
 from src.embedding_module.embedding_abc import EmbeddingABC
 from src.utils.helper import load_yaml
@@ -27,6 +28,11 @@ class OpenaiEmbedding(EmbeddingABC):
             raise ValueError("OpenAI API key not found in config or OPENAI_API_KEY env")
 
         self.client = OpenAI(api_key=api_key)
+        # Enable LangSmith tracing for OpenAI calls (minimal, env-driven)
+        try:
+            self.client = wrap_openai(self.client)
+        except Exception:
+            pass
         self.dim_size = int(config.get("dim")) if config.get("dim") is not None else None
 
         self.enc = tiktoken.get_encoding("cl100k_base")
