@@ -541,9 +541,10 @@ class CloudLLM(LLMABC):
             )
 
 
+        if not hasattr(resp, "choices") or not resp.choices or len(resp.choices) == 0:
+            raise RuntimeError("OpenAI API response has no choices. Response: {}".format(resp))
         choice = resp.choices[0]
         # --- Branch on finish_reason ---
-        if choice.finish_reason == "tool_calls":
             tool_call = choice.message.tool_calls[0]
             return True, {
                 "action": tool_call.function.name,
