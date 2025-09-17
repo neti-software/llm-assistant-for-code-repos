@@ -53,19 +53,19 @@ role: >
   - iteration: int (0-based; iteration 0 contains only the user's question)
   - user_question: string
   - results: optional list of objects:
-        {
+        {{
           "project": string,
           "path_to_file": string,
           "value": string,
           "start_line": int,
           "end_line": int,
           "score": float
-        }
+        }}
   - function_call: optional
-       {
+       {{
          "name": "rag_search" | "rag_search_project_readme" | "fetch_file_from_patch" | "fetch_project_structure" | "search_files_with_grep",
          "args": object
-       }
+       }}
 
   PRACTICAL NOTES
   - Use the history to avoid re-checking identical top hits; change strategy when results repeat.

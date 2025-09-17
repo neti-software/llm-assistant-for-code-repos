@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import os
 
@@ -52,8 +52,6 @@ else:
         _manual_load_env()
 
 
-from typing import List, Dict, Any
-
 def convert_tools(config_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     tools = []
     for tool in config_tools:
@@ -98,6 +96,151 @@ def convert_tools(config_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         tools.append(schema)
     return tools
+
+
+
+def _build_promptlayer_variables(
+    prompt_config: Dict[str, Any],
+    user_input: str,
+    raw_template_keys: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Populate PromptLayer variables, honoring template-provided placeholders."""
+    defaults = {
+        "history": user_input,
+        "input": user_input,
+        "query": user_input,
+        "topic": user_input,
+    }
+
+    # Prompt templates often expect explicit project/name tokens; provide sane fallbacks
+    project_fallback = (
+        os.getenv("PROMPTLAYER_DEFAULT_PROJECT")
+        or prompt_config.get("promptlayer_project")
+        or prompt_config.get("project")
+        or prompt_config.get("name")
+        or "repo-assistant"
+    )
+    name_fallback = (
+        os.getenv("PROMPTLAYER_DEFAULT_NAME")
+        or prompt_config.get("promptlayer_name")
+        or prompt_config.get("name")
+        or "RepoQAAssistant"
+    )
+
+    defaults.setdefault("project", project_fallback)
+    defaults.setdefault("name", name_fallback)
+
+    # Mirror raw template keys exactly to avoid PromptLayer warnings
+    if raw_template_keys:
+        for raw_key in raw_template_keys:
+            if not isinstance(raw_key, str):
+                continue
+            cleaned = raw_key.strip().strip('"').strip("'")
+            cleaned = cleaned.strip()
+            value = defaults.get(cleaned) or defaults.get(cleaned.lower()) or user_input
+            defaults[raw_key] = value
+
+    return defaults
+
+
+
+
+def _extract_template_input_keys(blueprint: Any) -> List[str]:
+    """Return raw input-variable keys from a PromptLayer blueprint."""
+    if isinstance(blueprint, dict):
+        template = blueprint.get("prompt_template")
+        if isinstance(template, dict):
+            raw_inputs = template.get("input_variables")
+            if isinstance(raw_inputs, list):
+                return [k for k in raw_inputs if isinstance(k, str)]
+    return []
+
+
+def _normalize_promptlayer_messages(raw_messages: Any, user_input: str) -> List[Dict[str, str]]:
+    """Normalize PromptLayer message representations into OpenAI chat format."""
+    normalized: List[Dict[str, str]] = []
+    if not isinstance(raw_messages, list):
+        return normalized
+
+    for msg in raw_messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if not isinstance(role, str) or not role:
+            continue
+
+        content = msg.get("content")
+        if isinstance(content, list):
+            parts: List[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get("text") or part.get("content")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(part, str):
+                    parts.append(part)
+            content = "".join(parts)
+        if content is None:
+            content = ""
+        if isinstance(content, str):
+            normalized.append({"role": role, "content": content})
+
+    if not any(msg.get("role") == "user" for msg in normalized):
+        normalized.append({"role": "user", "content": user_input})
+
+    return [msg for msg in normalized if msg.get("content") is not None]
+
+
+def _build_messages_from_promptlayer(
+    result: Optional[Dict[str, Any]],
+    prompt_config: Dict[str, Any],
+    user_input: str,
+) -> List[Dict[str, str]]:
+    """Derive a chat message stack from PromptLayer data with safe fallbacks."""
+    result = result or {}
+    candidates = []
+
+    raw_messages = result.get("messages")
+    if isinstance(raw_messages, list):
+        candidates.append(raw_messages)
+
+    blueprint = result.get("prompt_blueprint")
+    if isinstance(blueprint, dict):
+        template = blueprint.get("prompt_template")
+        if isinstance(template, dict):
+            template_messages = template.get("messages")
+            if isinstance(template_messages, list):
+                candidates.append(template_messages)
+
+    for raw in candidates:
+        normalized = _normalize_promptlayer_messages(raw, user_input)
+        if normalized:
+            return normalized
+
+    return [
+        {"role": "system", "content": prompt_config.get("role", "")},
+        {"role": "user", "content": user_input},
+    ]
+
+
+def _shrink_to_system_plus_user(
+    messages: List[Dict[str, str]],
+    user_input: str,
+    default_system: str,
+) -> List[Dict[str, str]]:
+    """Reduce a template-derived stack to a canonical system+user pair."""
+    system_content = next(
+        (msg["content"] for msg in messages if msg.get("role") == "system" and msg.get("content")),
+        None,
+    )
+    if not isinstance(system_content, str) or not system_content.strip():
+        system_content = default_system
+
+    return [
+        {"role": "system", "content": system_content or ""},
+        {"role": "user", "content": user_input},
+    ]
+
 
 
 
@@ -174,10 +317,13 @@ class CloudLLM(LLMABC):
 
         # Cache: first line of PromptLayer prompt for CLI indicator
         self._pl_prompt_first_line = None
+        self._pl_template_input_keys: List[str] = []
         if self.pl_client is not None:
             try:
                 blueprint = self.pl_client.templates.get(self.pl_prompt_name, {"input_variables": {}})
                 tpl = blueprint.get("prompt_template", "") if isinstance(blueprint, dict) else ""
+
+                self._pl_template_input_keys = _extract_template_input_keys(blueprint) or []
 
                 def _first_line_from_template(t):
                     # If plain string
@@ -218,6 +364,7 @@ class CloudLLM(LLMABC):
             except Exception as e:
                 # Non-fatal; leave as None
                 self._pl_prompt_first_line = None
+                self._pl_template_input_keys = []
                 self._pl_diag["prompt_fetch_error"] = str(e)
                 self._pl_diag["template_fetched"] = False
 
@@ -273,8 +420,13 @@ class CloudLLM(LLMABC):
             }
 
         tools = convert_tools(self.prompt_config.get("tools"))
-        # Prefer PromptLayer if configured, else call OpenAI directly
-        if self.pl_client is not None and not os.getenv("DISABLE_PROMPTLAYER", "").lower() in ("1", "true", "yes"):
+        resp: Optional[Any] = None
+        result: Optional[Dict[str, Any]] = None
+
+
+
+        promptlayer_disabled = os.getenv("DISABLE_PROMPTLAYER", "").lower() in ("1", "true", "yes")
+        if self.pl_client is not None and not promptlayer_disabled:
             overrides: Dict[str, Any] = {
                 "model": self.model,
                 "tools": tools if tools else None,
@@ -285,79 +437,82 @@ class CloudLLM(LLMABC):
             }
             overrides = {k: v for k, v in overrides.items() if v is not None}
 
-            # Common variable names; template will use what it needs
-            input_variables = {
-                "history": user_input,
-                "input": user_input,
-                "query": user_input,
-                "topic": user_input,
-                "project": "",  # Dummy value to prevent warnings
-                "name": "",     # Dummy value to prevent warnings
-            }
-
-            result = self.pl_client.run(
-                prompt_name=self.pl_prompt_name,
-                input_variables=input_variables,
-                model_parameter_overrides=overrides,
-                tags=["repo-assistant", "tool-calls"],
-                metadata={"source": "llm-assistant-for-code-repos"},
+            input_variables = _build_promptlayer_variables(
+                self.prompt_config,
+                user_input,
+                self._pl_template_input_keys,
             )
-            
-            # Check if we got a problematic template with empty assistant messages
-            if "prompt_blueprint" in result:
-                blueprint = result["prompt_blueprint"]
-                if isinstance(blueprint, dict) and "prompt_template" in blueprint:
-                    template = blueprint["prompt_template"]
-                    if isinstance(template, dict) and "messages" in template:
-                        messages = template["messages"]
-                        
-                        # Filter out empty assistant messages and keep only system messages
-                        filtered_messages = []
-                        system_content = None
-                        
-                        for msg in messages:
-                            role = msg.get("role", "")
-                            content = msg.get("content", "")
-                            
-                            if role == "system":
-                                # Extract system content - handle both string and list formats
-                                if isinstance(content, list) and len(content) > 0:
-                                    # PromptLayer format: [{'type': 'text', 'text': '...'}]
-                                    if isinstance(content[0], dict) and 'text' in content[0]:
-                                        system_content = content[0]['text']
-                                elif isinstance(content, str):
-                                    system_content = content
-                                    
-                        # If we found system content and the original had problems, create a clean response
-                        if system_content and len(messages) > 1:
-                            print(f"[DEBUG] Found problematic template with {len(messages)} messages, using system content only")
-                            
-                            # Create a new clean request with only the system message
-                            clean_messages = [
-                                {"role": "system", "content": system_content},
-                                {"role": "user", "content": user_input}
-                            ]
-                            
-                            # Call OpenAI directly with the clean messages
-                            resp = self.client.chat.completions.create(
-                                model=self.model,
-                                messages=clean_messages,
-                                max_completion_tokens=self.max_completion_tokens,
-                                tools=tools,
-                                tool_choice=self.tool_choice,
-                                response_format=response_format,
-                            )
-                            print(f"[DEBUG] Used filtered system message, bypassed problematic template")
-            
-            if resp is None:
-                resp = result.get("raw_response")
-            # Debug: log if we got an unexpected response structure
-            if resp is None:
-                print(f"[DEBUG] PromptLayer returned None raw_response for prompt '{self.pl_prompt_name}'")
-                print(f"[DEBUG] Full result keys: {list(result.keys()) if result else 'None'}")
-            elif not hasattr(resp, 'choices') or not resp.choices:
-                print(f"[DEBUG] PromptLayer response missing choices for prompt '{self.pl_prompt_name}'")
-                print(f"[DEBUG] Response type: {type(resp)}, content: {str(resp)[:200]}")
+            force_system_only = os.getenv("PROMPTLAYER_FORCE_SYSTEM_ONLY", "0").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+            try:
+                result = self.pl_client.run(
+                    prompt_name=self.pl_prompt_name,
+                    input_variables=input_variables,
+                    model_parameter_overrides=overrides,
+                    tags=["repo-assistant", "tool-calls"],
+                    metadata={"source": "llm-assistant-for-code-repos"},
+                )
+            except Exception as exc:
+                print(f"[DEBUG] PromptLayer run failed for '{self.pl_prompt_name}': {exc}")
+                self._pl_diag["last_run_error"] = str(exc)
+            else:
+                blueprint = result.get("prompt_blueprint") if isinstance(result, dict) else None
+                new_keys = _extract_template_input_keys(blueprint)
+                if new_keys:
+                    self._pl_template_input_keys = new_keys
+
+                messages_from_template = _build_messages_from_promptlayer(
+                    result,
+                    self.prompt_config,
+                    user_input,
+                )
+
+                if messages_from_template:
+                    if force_system_only:
+                        messages_to_use = _shrink_to_system_plus_user(
+                            messages_from_template,
+                            user_input,
+                            self.prompt_config.get("role", ""),
+                        )
+                        print(
+                            "[DEBUG] PromptLayer replayed with system-only messages due to "
+                            "PROMPTLAYER_FORCE_SYSTEM_ONLY"
+                        )
+                    else:
+                        messages_to_use = messages_from_template
+
+                    resp = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages_to_use,
+                        max_completion_tokens=self.max_completion_tokens,
+                        tools=tools,
+                        tool_choice=self.tool_choice,
+                        response_format=response_format,
+                    )
+                else:
+                    resp = result.get("raw_response") if isinstance(result, dict) else None
+                    if resp is None or not getattr(resp, "choices", None):
+                        print(
+                            f"[DEBUG] PromptLayer raw response unavailable for '{self.pl_prompt_name}', "
+                            "falling back to prompt_config"
+                        )
+                        fallback_messages = [
+                            {"role": "system", "content": self.prompt_config.get("role", "")},
+                            {"role": "user", "content": user_input},
+                        ]
+                        resp = self.client.chat.completions.create(
+                            model=self.model,
+                            messages=fallback_messages,
+                            max_completion_tokens=self.max_completion_tokens,
+                            tools=tools,
+                            tool_choice=self.tool_choice,
+                            response_format=response_format,
+                        )
+
         else:
             # --- call OpenAI directly with YAML system prompt ---
             messages: List[Dict[str, str]] = [
@@ -372,6 +527,20 @@ class CloudLLM(LLMABC):
                 tool_choice=self.tool_choice,
                 response_format=response_format,
             )
+
+
+        if resp is None:
+            fallback_messages = _build_messages_from_promptlayer(result, self.prompt_config, user_input)
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=fallback_messages,
+                max_completion_tokens=self.max_completion_tokens,
+                tools=tools,
+                tool_choice=self.tool_choice,
+                response_format=response_format,
+            )
+
+
         choice = resp.choices[0]
         # --- Branch on finish_reason ---
         if choice.finish_reason == "tool_calls":
