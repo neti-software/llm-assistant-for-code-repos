@@ -2,6 +2,9 @@ import json
 from typing import Any, Dict, List
 import datetime
 import os
+import copy
+
+from src.langgraph.state_models import ConversationState, conversation_from_raw, ControlFlags
 
 
 class ConversationHistory:
@@ -69,6 +72,28 @@ class ConversationHistory:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.history, indent=indent, default=str)
+
+    # LangGraph adapters -------------------------------------------------
+
+    def to_state_snapshot(self) -> ConversationState:
+        """Return a structured ConversationState snapshot.
+
+        The snapshot keeps the raw history data intact while exposing
+        iteration counters through ControlFlags for orchestrator bookkeeping.
+        """
+
+        buffer = conversation_from_raw(self.history)
+        state = ConversationState(conversation=buffer)
+        state.control_flags = ControlFlags(iteration=self.iteration)
+        return state
+
+    def apply_state_delta(self, state: ConversationState) -> None:
+        """Apply updates from a ConversationState back into the history."""
+
+        snapshot = state.conversation.dict()
+        self.history = copy.deepcopy(snapshot)
+        self.iteration = state.control_flags.iteration
+        self.question_counter = len(self.history.get("user_questions", {}))
 
     def save(self) -> str:
         """
