@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 import json
 import os
 
@@ -419,7 +419,7 @@ class CloudLLM(LLMABC):
                 "json_schema": schema,
             }
 
-        tools = convert_tools(self.prompt_config.get("tools"))
+        tools = convert_tools(self.prompt_config.get("tools") or [])  # type: ignore
         resp: Optional[Any] = None
         result: Optional[Dict[str, Any]] = None
 
@@ -487,11 +487,11 @@ class CloudLLM(LLMABC):
 
                     resp = self.client.chat.completions.create(
                         model=self.model,
-                        messages=messages_to_use,
+                        messages=messages_to_use,  # type: ignore
                         max_completion_tokens=self.max_completion_tokens,
-                        tools=tools,
+                        tools=tools,  # type: ignore
                         tool_choice=self.tool_choice,
-                        response_format=response_format,
+                        response_format=response_format,  # type: ignore
                     )
                 else:
                     resp = result.get("raw_response") if isinstance(result, dict) else None
@@ -506,11 +506,11 @@ class CloudLLM(LLMABC):
                         ]
                         resp = self.client.chat.completions.create(
                             model=self.model,
-                            messages=fallback_messages,
+                            messages=fallback_messages,  # type: ignore
                             max_completion_tokens=self.max_completion_tokens,
-                            tools=tools,
+                            tools=tools,  # type: ignore
                             tool_choice=self.tool_choice,
-                            response_format=response_format,
+                            response_format=response_format,  # type: ignore
                         )
 
         else:
@@ -521,11 +521,11 @@ class CloudLLM(LLMABC):
             ]
             resp = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore
                 max_completion_tokens=self.max_completion_tokens,
-                tools=tools,
+                tools=tools,  # type: ignore
                 tool_choice=self.tool_choice,
-                response_format=response_format,
+                response_format=response_format,  # type: ignore
             )
 
 
@@ -533,11 +533,11 @@ class CloudLLM(LLMABC):
             fallback_messages = _build_messages_from_promptlayer(result, self.prompt_config, user_input)
             resp = self.client.chat.completions.create(
                 model=self.model,
-                messages=fallback_messages,
+                messages=fallback_messages,  # type: ignore
                 max_completion_tokens=self.max_completion_tokens,
-                tools=tools,
+                tools=tools,  # type: ignore
                 tool_choice=self.tool_choice,
-                response_format=response_format,
+                response_format=response_format,  # type: ignore
             )
 
 

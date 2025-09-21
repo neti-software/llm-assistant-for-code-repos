@@ -1,7 +1,7 @@
 type: "cloud"
 provider: "openrouter" # Can be "openai" or "openrouter"
-model: "openrouter/sonoma-sky-alpha"
-context_length: 2000000
+model: "google/gemini-2.5-flash"
+context_length: 1000000
 max_completion_tokens: 4000
 tool_choice: "auto"
 path_to_api_key: "configs/openrouter_key.yaml"

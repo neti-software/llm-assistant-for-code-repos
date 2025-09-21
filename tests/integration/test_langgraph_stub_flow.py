@@ -3,7 +3,7 @@ import pytest
 from src.langgraph.agents.task_planner import TaskPlannerAgent
 from src.langgraph.agents.repo_intelligence import RepoIntelligenceAgent
 from src.langgraph.agents.code_inspector import CodeInspectorAgent
-from src.langgraph.agents.verifier import VerifierAgent
+from src.langgraph.agents.verifier import VerifierAgent, VerifierReport
 from src.langgraph.agents.responder import ResponderAgent
 from src.langgraph.orchestrator import Orchestrator
 from src.langgraph.state_models import ConversationState, ConversationBuffer, EvidenceItem
@@ -46,7 +46,7 @@ def test_langgraph_stub_flow_runs_end_to_end():
     rag_node = StubToolNode(
         "rag_search",
         [
-            {"path": "docs/README.md", "summary": "Foo architecture overview"},
+            {"path": "docs/README.md", "snippet": "Foo architecture overview with detailed explanation of the Foo class implementation."},
         ],
     )
     repo_agent = RepoIntelligenceAgent(tool_nodes=[search_node, rag_node])
@@ -81,12 +81,13 @@ def test_langgraph_stub_flow_runs_end_to_end():
 
     state = build_state("Where is the Foo class implemented?")
 
-    report = orchestrator.run(state)
-    assert report.coverage_score >= 0.6
-    assert not report.missing_items
+    final_report, timeline = orchestrator.run(state)
+    assert isinstance(final_report, VerifierReport)
+    assert final_report.coverage_score >= 0.6
+    assert not final_report.missing_items
 
     response = responder.respond(state)
-    assert "Foo architecture overview" in response.message
+    assert "Foo architecture overview with detailed explanation" in response.message
     assert "class Foo" in response.message
     assert response.citations
 

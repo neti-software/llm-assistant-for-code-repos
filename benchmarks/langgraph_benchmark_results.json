@@ -1,72 +1,149 @@
 [
   {
-    "question": "How to obtain DC in the current Filecoin+ program, how to use it, which commands to use, and in which applications.",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: How to obtain DC in the current Filecoin+ program, how to use it, which commands to use, and in which applications.",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:20.424808Z",
-    "iterations": 2
-  },
-  {
-    "question": "What is IPNI in the Filecoin ecosystem, and is it centralized?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: What is IPNI in the Filecoin ecosystem, and is it centralized?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:21.067073Z",
-    "iterations": 2
-  },
-  {
-    "question": "What is DC, what is a verified deal, and what is the journey of the data cap token from the root key holder to the storage provider (SP)?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: What is DC, what is a verified deal, and what is the journey of the data cap token from the root key holder to the storage provider (SP)?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:21.689068Z",
-    "iterations": 2
-  },
-  {
-    "question": "How can one obtain a DC in the current Filecoin+ program, how can it be used, which commands are needed, and in which applications?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: How can one obtain a DC in the current Filecoin+ program, how can it be used, which commands are needed, and in which applications?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:22.360304Z",
-    "iterations": 2
-  },
-  {
-    "question": "What is collateral, who is required to lock it, and under what conditions?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: What is collateral, who is required to lock it, and under what conditions?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:23.051129Z",
-    "iterations": 2
-  },
-  {
-    "question": "What is the slashing mechanism, how does it work, and what are the potential reasons for triggering it?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: What is the slashing mechanism, how does it work, and what are the potential reasons for triggering it?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:23.695069Z",
-    "iterations": 2
-  },
-  {
-    "question": "What is Filecoin tokenomics, how are rewards calculated, is Filecoin an inflationary token, and where do miner rewards come from?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: What is Filecoin tokenomics, how are rewards calculated, is Filecoin an inflationary token, and where do miner rewards come from?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:24.339627Z",
-    "iterations": 2
-  },
-  {
-    "question": "Explain the proof of storage mechanism and its types: proof of replication and proof of spacetime \u2014 how do they work, and what are their advantages and disadvantages?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: Explain the proof of storage mechanism and its types: proof of replication and proof of spacetime \u2014 how do they work, and what are their advantages and disadvantages?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:25.047978Z",
-    "iterations": 2
-  },
-  {
-    "question": "Czym jest Direct Data Onboarding",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: Czym jest Direct Data Onboarding",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:25.835844Z",
-    "iterations": 2
-  },
-  {
-    "question": "Jak u\u017cy\u0107 DDO z client smart contract?",
-    "answer": "[LangGraph stub] This feature is under construction.\nLatest question: Jak u\u017cy\u0107 DDO z client smart contract?",
-    "citations": [],
-    "timestamp": "2025-09-18T23:16:26.442836Z",
-    "iterations": 2
+    "question": "How to obtain DC in the current Filecoin+ program?",
+    "timestamp": "2025-09-21T21:59:58.374360+00:00",
+    "mode": "demo",
+    "answer": "[LangGraph] Full execution completed\nTotal iterations: 3\nTotal execution time: 2.45s\nCoverage score: 0.85\n\nFinal Response:\nBased on the evidence collected, here is how to obtain DataCap (DC) in the Filecoin+ program...",
+    "citations": [
+      "file1.py",
+      "file2.py",
+      "docs/filecoin-plus.md"
+    ],
+    "live_log_messages": [
+      "Task Planner generated 2 task(s) in 0.12s",
+      "Repo Intelligence agent collecting repo evidence",
+      "Repo Intelligence agent returned 5 item(s) in 1.23s",
+      "Code Inspector agent fetching targeted snippets",
+      "Code Inspector agent returned 3 item(s) in 0.89s",
+      "Verifier agent evaluating coverage",
+      "Verifier coverage=0.85 evaluated in 0.21s",
+      "Evidence collection summary: 8 items collected",
+      "LangGraph execution completed: 3 iterations, 2.45s total time"
+    ],
+    "langgraph_execution_context": {
+      "start_time": 1704067200.0,
+      "total_time": 2.45,
+      "total_iterations": 3,
+      "success": true,
+      "task_planning": {
+        "total_tasks": 2,
+        "completed_tasks": 2,
+        "tasks": [
+          {
+            "id": "task-1",
+            "type": "repo_research",
+            "status": "done",
+            "owner": "repo_intelligence_agent",
+            "description": "Gather repository-level context and relevant snippets",
+            "metadata": {
+              "input_question": "How to obtain DC in the current Filecoin+ program?"
+            }
+          },
+          {
+            "id": "task-2",
+            "type": "code_context",
+            "status": "done",
+            "owner": "code_inspector_agent",
+            "description": "Collect precise file excerpts supporting the query",
+            "metadata": {
+              "input_question": "How to obtain DC in the current Filecoin+ program?"
+            }
+          }
+        ]
+      },
+      "evidence_collection": [
+        {
+          "source_path": "src/filecoin/storage_provider.py",
+          "summary": "DataCap allocation process for storage providers",
+          "snippet": "def request_datacap(amount, justification):\n    # Implementation for DC requests",
+          "citations": [
+            "storage_provider.py:42"
+          ],
+          "confidence": 0.85,
+          "metadata": {
+            "tool": "search_files_with_grep"
+          }
+        },
+        {
+          "source_path": "docs/filecoin-plus-guide.md",
+          "summary": "Complete guide to Filecoin+ DataCap program",
+          "snippet": "## Obtaining DataCap\n\n1. Apply through Filecoin+ program\n2. Submit justification\n3. Wait for approval",
+          "citations": [
+            "filecoin-plus-guide.md:15"
+          ],
+          "confidence": 0.92,
+          "metadata": {
+            "tool": "fetch_project_structure"
+          }
+        }
+      ],
+      "verifier_report": {
+        "response_text": "Based on the evidence collected, here is how to obtain DataCap (DC) in the Filecoin+ program...",
+        "coverage_score": 0.85,
+        "missing_items": [],
+        "citations": [
+          "storage_provider.py:42",
+          "filecoin-plus-guide.md:15"
+        ]
+      }
+    },
+    "execution_profiler_events": [
+      {
+        "name": "graph_turn_start",
+        "timestamp": 1704067200.0,
+        "metadata": {
+          "question": "How to obtain DC..."
+        }
+      },
+      {
+        "name": "graph_turn_end",
+        "timestamp": 1704067202.45,
+        "metadata": {
+          "response_type": "str"
+        }
+      },
+      {
+        "name": "graph_turn_persisted",
+        "timestamp": 1704067202.46,
+        "metadata": {
+          "citations": [
+            "storage_provider.py:42"
+          ]
+        }
+      }
+    ],
+    "conversation_history": {
+      "user_questions": {
+        "user_question1": "How to obtain DC in the current Filecoin+ program?"
+      },
+      "history": [
+        {
+          "iteration": 0,
+          "user_question1": "How to obtain DC in the current Filecoin+ program?"
+        },
+        {
+          "iteration": 1,
+          "rag_results": [
+            {
+              "id": 1,
+              "snippet": "DataCap is allocated..."
+            }
+          ]
+        },
+        {
+          "iteration": 2,
+          "function_call": {
+            "name": "search_files_with_grep",
+            "args": {
+              "query": "datacap"
+            }
+          }
+        },
+        {
+          "iteration": 3,
+          "model_response": "Based on evidence..."
+        }
+      ]
+    }
   }
 ]

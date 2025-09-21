@@ -122,8 +122,8 @@ class StreamlitChat:
             self._log(live_log, _md_code("json", _short(tool_result)), "trace")
 
             # persist for next iteration
-                self.conversation_history.add_tool_call(action, args, tool_result)
-                iteration += 1
+            self.conversation_history.add_tool_call(action, args, tool_result)
+            iteration += 1
 
     def handle_question(self, question: str, live_log: Callable[[str, str], None]):
         # record user turn

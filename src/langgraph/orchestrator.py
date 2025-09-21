@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
+import time
+from typing import Optional, List, Dict, Any
 
-from .state_models import ConversationState, Task
+from .state_models import ConversationState, Task, EvidenceItem
 
 
 class Orchestrator:
@@ -23,34 +24,103 @@ class Orchestrator:
         self.verifier = verifier
         self.max_iterations = max_iterations
 
-    def run(self, state: ConversationState, live_log=None) -> Optional[object]:
+    def run(self, state: ConversationState, live_log=None) -> tuple[object, List[Dict[str, Any]]]:
         iteration = 0
         final_report = None
+        start_time = time.perf_counter()
+        timeline: List[Dict[str, Any]] = []
 
         while iteration < self.max_iterations:
             state.control_flags.iteration = iteration
 
+            turn_start = time.perf_counter()
             new_state, new_tasks = self.task_planner.plan(state)
             state = new_state
+            planning_duration = time.perf_counter() - turn_start
+
+            iteration_entry: Dict[str, Any] = {
+                "iteration": iteration,
+                "planning": {
+                    "new_tasks": [task.dict() for task in new_tasks],
+                    "total_tasks": len(state.tasks),
+                    "duration_sec": round(planning_duration, 3),
+                },
+                "repo_agent": None,
+                "code_agent": None,
+                "verifier": None,
+            }
+
+            self._log(
+                live_log,
+                f"Task Planner generated {len(new_tasks)} task(s) in {planning_duration:.2f}s",
+            )
+
+            repo_new_items = []
+            code_new_items = []
 
             for task in list(state.tasks):
                 if task.status in {"done", "in_progress"}:
                     continue
                 if task.owner == "repo_intelligence_agent":
                     self._log(live_log, "Repo Intelligence agent collecting repo evidence")
-                    state, _ = self.repo_agent.run(state, query=self._latest_question(state))
+                    start = time.perf_counter()
+                    state, evidence = self.repo_agent.run(state, query=self._latest_question(state))
+                    elapsed = time.perf_counter() - start
+                    repo_new_items = evidence
+                    iteration_entry["repo_agent"] = {
+                        "items_collected": len(evidence),
+                        "duration_sec": round(elapsed, 3),
+                        "total_content_length": sum(len(item.snippet or item.summary or "") for item in evidence),
+                    }
+                    self._log(
+                        live_log,
+                        f"Repo Intelligence agent returned {len(evidence)} item(s) in {elapsed:.2f}s",
+                    )
                     task.status = "done"
                 elif task.owner == "code_inspector_agent":
                     self._log(live_log, "Code Inspector agent fetching targeted snippets")
-                    state, _ = self.code_agent.run(state, task=task)
+                    start = time.perf_counter()
+                    state, evidence = self.code_agent.run(state, task=task)
+                    elapsed = time.perf_counter() - start
+                    code_new_items = evidence
+                    iteration_entry["code_agent"] = {
+                        "items_collected": len(evidence),
+                        "duration_sec": round(elapsed, 3),
+                        "total_content_length": sum(len(item.snippet or item.summary or "") for item in evidence),
+                    }
+                    self._log(
+                        live_log,
+                        f"Code Inspector agent returned {len(evidence)} item(s) in {elapsed:.2f}s",
+                    )
                     task.status = "done"
                 else:
                     task.status = "skipped"
 
+            total_added = len(repo_new_items) + len(code_new_items)
+            if total_added:
+                self._log(
+                    live_log,
+                    f"Evidence collection summary: {total_added} item(s) gathered this iteration",
+                )
+
             self._log(live_log, "Verifier agent evaluating coverage")
+            start = time.perf_counter()
             report = self.verifier.evaluate(state, question=self._latest_question(state) or "")
             self.verifier.apply_report(state, report)
+            elapsed = time.perf_counter() - start
+            iteration_entry["verifier"] = {
+                "coverage_score": getattr(report, "coverage_score", 0),
+                "missing_items": getattr(report, "missing_items", []),
+                "duration_sec": round(elapsed, 3),
+            }
+            self._log(
+                live_log,
+                f"Verifier coverage={getattr(report, 'coverage_score', 0):.2f} evaluated in {elapsed:.2f}s",
+            )
             final_report = report
+
+            iteration_entry["total_evidence_items"] = len(state.evidence_store)
+            timeline.append(iteration_entry)
 
             if getattr(report, "missing_items", []):
                 iteration += 1
@@ -58,7 +128,15 @@ class Orchestrator:
             break
 
         state.control_flags.iteration = iteration
-        return final_report
+
+        total_iterations = iteration + 1
+        total_time = time.perf_counter() - start_time
+        timeline_summary = (
+            f"LangGraph execution completed: {total_iterations} iterations, {total_time:.2f}s total time"
+        )
+        self._log(live_log, timeline_summary)
+
+        return final_report, timeline
 
     def _latest_question(self, state: ConversationState) -> Optional[str]:
         if state.conversation.history:

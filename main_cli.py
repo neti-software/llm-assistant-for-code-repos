@@ -34,30 +34,32 @@ def build_core():
         get_status = getattr(llm, "get_promptlayer_status", None)
         if callable(get_status):
             st = get_status()
-            if st.get("active"):
+            if isinstance(st, dict) and st.get("active"):
                 yaml_name = st.get("yaml_prompt_name", "unknown")
                 pl_name = st.get("prompt_name", "unknown")
 
-                if st.get("template_fetched") and st.get("first_line"):
+                if isinstance(st, dict) and st.get("template_fetched") and st.get("first_line"):
                     print(f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
                     print(f"{Fore.GREEN}Prompt preview:{Style.RESET_ALL} {st['first_line']}")
-                elif st.get("template_fetched"):
+                elif isinstance(st, dict) and st.get("template_fetched"):
                     print(
                         f"{Fore.GREEN}PromptLayer loaded:{Style.RESET_ALL} name: {yaml_name} → {pl_name} (no preview)")
                 else:
                     print(f"{Fore.YELLOW}PromptLayer connected:{Style.RESET_ALL} name: {yaml_name} → {pl_name}")
-                    if st.get("prompt_fetch_error"):
+                    if isinstance(st, dict) and st.get("prompt_fetch_error"):
                         print(f"{Fore.YELLOW}Template fetch error:{Style.RESET_ALL} {st['prompt_fetch_error']}")
                         print(f"{Fore.YELLOW}This might cause fallback to generic prompt!{Style.RESET_ALL}")
             else:
+                if not isinstance(st, dict):
+                    st = {}
                 yaml_name = st.get("yaml_prompt_name", "unknown")
                 reasons = []
-                if not st.get("import_ok", True):
+                if isinstance(st, dict) and not st.get("import_ok", True):
                     reasons.append("promptlayer not installed")
 
-                if not st.get("key_present", True):
+                if isinstance(st, dict) and not st.get("key_present", True):
                     reasons.append("PROMPT_LAYER_API_KEY missing in .env")
-                if st.get("client_init_error"):
+                if isinstance(st, dict) and st.get("client_init_error"):
                     reasons.append(f"client init error: {st['client_init_error']}")
                 reason_text = "; ".join(reasons) or "unknown"
                 print(
@@ -130,7 +132,7 @@ def _extract_message_and_citations(response) -> tuple[str, list]:
 
 
 @execution_profiler
-def chat_loop(user_question, llm, tool_manager, conversation_history, runner: LangGraphRunner):
+def chat_loop(user_question, llm, tool_manager, conversation_history, runner: LangGraphRunner, live_log=None):
     """Add a user question, run loop, and return final model response."""
     conversation_history.add_user_question(user_question)
     using_graph = getattr(runner, "use_graph", False)
@@ -138,18 +140,48 @@ def chat_loop(user_question, llm, tool_manager, conversation_history, runner: La
         print(f"{Fore.CYAN}LangGraph: planning tasks...{Style.RESET_ALL}")
         execution_profiler.record_event("graph_turn_start", question=user_question)
 
+    # Use custom live_log if provided, otherwise use default
+    if using_graph and live_log is None:
+        live_log = lambda msg: print(f"{Fore.CYAN}{msg}{Style.RESET_ALL}")
+
     resp = runner.run_turn(
         llm,
         tool_manager,
         conversation_history,
-        live_log=(lambda msg: print(f"{Fore.CYAN}{msg}{Style.RESET_ALL}")) if runner.use_graph else None,
+        live_log=live_log,
     )
 
     if using_graph:
         execution_profiler.record_event("graph_turn_end", response_type=type(resp).__name__)
 
     message, citations = _extract_message_and_citations(resp)
-    conversation_history.add_model_response(message)
+
+    # Capture execution context if available
+    execution_context = None
+    if isinstance(resp, dict) and "execution_context" in resp:
+        execution_context = resp["execution_context"]
+        conversation_history.add_agent_execution_context(execution_context)
+
+        # Add detailed evidence collection if available
+        if "evidence_collection" in execution_context:
+            conversation_history.add_evidence_collection(execution_context["evidence_collection"])
+
+        # Add verifier report if available
+        if "verifier_report" in execution_context:
+            conversation_history.add_verifier_report(execution_context["verifier_report"])
+
+        # Add execution metrics
+        metrics = {
+            "total_time": execution_context.get("total_time"),
+            "total_iterations": execution_context.get("total_iterations"),
+            "success": execution_context.get("success")
+        }
+        conversation_history.add_execution_metrics(metrics)
+
+    conversation_history.add_model_response(message, metadata={
+        "citations": citations,
+        "execution_context_available": execution_context is not None
+    })
     conversation_history.save()
 
     if using_graph:

@@ -29,6 +29,10 @@ class CodeInspectorAgent:
             except Exception:
                 pass
 
+        # If no target paths provided, try to extract them from existing evidence
+        if not target_paths:
+            target_paths = self._extract_target_paths_from_evidence(state, task)
+
         if not target_paths:
             return state, []
 
@@ -45,11 +49,14 @@ class CodeInspectorAgent:
                 continue
             if result.get("error"):
                 continue
+
             payload = result.get("data")
-            if not payload:
+            normalized_items = self._normalize_payload(payload)
+            if not normalized_items:
                 continue
+
             evidence_items.extend(
-                self._convert_results(path, self.file_node.tool_name, payload, result)
+                self._convert_results(path, self.file_node.tool_name, normalized_items, result)
             )
 
         if evidence_items:
@@ -57,19 +64,34 @@ class CodeInspectorAgent:
 
         return state, evidence_items
 
+    def _normalize_payload(self, payload: Any) -> List[Any]:
+        """Ensure tool payload is iterable without breaking strings into characters."""
+
+        if payload is None:
+            return []
+        if isinstance(payload, (str, bytes)):
+            return [payload]
+        if isinstance(payload, dict):
+            return [payload]
+        if isinstance(payload, Iterable):
+            return list(payload)
+        return [payload]
+
     def _convert_results(
         self,
         target_path: str,
         tool_name: str,
-        payload: Iterable[Any],
+        payload_items: List[Any],
         raw_result: dict,
     ) -> List[EvidenceItem]:
         citations = raw_result.get("citations", [])
         confidence = raw_result.get("confidence")
+        if confidence is None:
+            confidence = 1.0
         args_metadata = raw_result.get("metadata", {}).get("args", {})
 
         evidence: List[EvidenceItem] = []
-        for idx, item in enumerate(payload):
+        for idx, item in enumerate(payload_items):
             snippet = None
             line_start = None
             line_end = None
@@ -85,10 +107,12 @@ class CodeInspectorAgent:
             else:
                 continue
 
+            # Create evidence item with full snippet content - no summarization
             evidence.append(
                 EvidenceItem(
                     source_path=target_path,
                     snippet=snippet,
+                    summary=snippet,  # Store full snippet as summary for consistency with full data approach
                     citations=[citations[idx]] if idx < len(citations) else [],
                     confidence=confidence,
                     metadata={
@@ -101,3 +125,21 @@ class CodeInspectorAgent:
                 )
             )
         return evidence
+
+    def _extract_target_paths_from_evidence(self, state: ConversationState, task: Task) -> List[str]:
+        """Extract potential target file paths from existing evidence."""
+        if not state.evidence_store:
+            return []
+
+        source_paths = {
+            item.source_path
+            for item in state.evidence_store
+            if item.source_path and item.source_path != "unknown"
+        }
+
+        relevant_paths = list(source_paths)
+
+        if task.metadata:
+            task.metadata["target_paths"] = relevant_paths
+
+        return relevant_paths[:5]

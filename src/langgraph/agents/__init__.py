@@ -2,5 +2,7 @@
 
 from .task_planner import TaskPlannerAgent
 from .repo_intelligence import RepoIntelligenceAgent
+from .code_inspector import CodeInspectorAgent
+from .verifier import VerifierAgent
 
-__all__ = ["TaskPlannerAgent", "RepoIntelligenceAgent"]
+__all__ = ["TaskPlannerAgent", "RepoIntelligenceAgent", "CodeInspectorAgent", "VerifierAgent"]
