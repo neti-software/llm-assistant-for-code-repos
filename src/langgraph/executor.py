@@ -24,23 +24,23 @@ def _maybe_tool(tool_manager, name: str):
 def execute_turn(llm: Any, tool_manager: Any, state: ConversationState, live_log=None) -> dict:
     """Execute the LangGraph agents and return the final response plus updated state."""
 
-    # Get LLM config for task planner
-    llm_config = getattr(llm, 'config', {}) if llm else {}
-
-    planner = TaskPlannerAgent(llm_config=llm_config)
+    planner = TaskPlannerAgent()
+    # Pass the LLM client directly to the planner
+    if llm:
+        planner.llm = llm
 
     repo_nodes: List[Any] = []
     for tool_name in ("rag_search", "rag_search_project_readme", "search_files_with_grep"):
         node = _maybe_tool(tool_manager, tool_name)
         if node is not None:
             repo_nodes.append(node)
-    repo_agent = RepoIntelligenceAgent(tool_nodes=repo_nodes)
+    repo_agent = RepoIntelligenceAgent(tool_nodes=repo_nodes, llm=llm)
 
     structure_node = None  # full structure support to be added with richer tasks
     file_node = _maybe_tool(tool_manager, "fetch_file_from_patch")
     code_agent = CodeInspectorAgent(structure_node=structure_node, file_node=file_node)
 
-    verifier = VerifierAgent(coverage_threshold=0.7)
+    verifier = VerifierAgent(coverage_threshold=0.7, llm=llm)
     responder = ResponderAgent()
 
     orchestrator = Orchestrator(
@@ -48,6 +48,8 @@ def execute_turn(llm: Any, tool_manager: Any, state: ConversationState, live_log
         repo_agent=repo_agent,
         code_agent=code_agent,
         verifier=verifier,
+        responder=responder,
+        llm=llm,
         max_iterations=4,
     )
 

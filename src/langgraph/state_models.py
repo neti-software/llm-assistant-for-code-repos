@@ -56,11 +56,10 @@ class Task:
 
 @dataclass
 class EvidenceItem:
-    """Structured evidence captured by specialist agents."""
+    """Structured evidence captured by specialist agents with complete agent answer."""
 
+    full_content: str  # Complete agent answer - no summarization or processing
     source_path: Optional[str] = None
-    summary: Optional[str] = None
-    snippet: Optional[str] = None
     citations: List[str] = field(default_factory=list)
     confidence: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -68,8 +67,7 @@ class EvidenceItem:
     def dict(self) -> Dict[str, Any]:  # pragma: no cover - helper for future use
         return {
             "source_path": self.source_path,
-            "summary": self.summary,
-            "snippet": self.snippet,
+            "full_content": self.full_content,
             "citations": list(self.citations),
             "confidence": self.confidence,
             "metadata": copy.deepcopy(self.metadata),

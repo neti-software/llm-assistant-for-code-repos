@@ -1,12 +1,13 @@
-"""Responder agent that formats the final answer from gathered evidence."""
+"""Responder agent that generates the final answer using LLM with structured context."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any, Optional
 
 from ..state_models import ConversationState
 from ..debug_logger import debug_log
+from ...llm_module.llm_builder import build_llm
 
 
 @dataclass
@@ -16,6 +17,12 @@ class FinalResponse:
 
 
 class ResponderAgent:
+    def __init__(self, llm_config: Optional[Dict[str, Any]] = None) -> None:
+        self.llm_config = llm_config
+        self.llm = None
+        if llm_config:
+            self.llm = build_llm(llm_config)
+
     def respond(self, state: ConversationState) -> FinalResponse:
         # Get the original question to provide context
         question = self._get_latest_question(state)
@@ -50,93 +57,145 @@ class ResponderAgent:
         return "Unknown question"
 
     def _synthesize_response(self, state: ConversationState, question: str) -> str:
-        """Synthesize a focused response from the collected evidence."""
+        """Generate final answer using LLM with structured context from all agents."""
         if not state.evidence_store:
             return f"Insufficient evidence to answer: {question}"
 
-        # Start with the question context
+        # Group evidence by agent type for structured context
+        agent_context = self._group_evidence_by_agent(state)
+
+        # Log the complete context for debugging
+        self._log_context_for_debugging(question, agent_context)
+
+        # Use LLM to generate final answer if available
+        if self.llm:
+            return self._generate_llm_response(question, agent_context)
+
+        # Fallback to formatted response if no LLM
+        return self._generate_formatted_response(question, agent_context)
+
+    def _group_evidence_by_agent(self, state: ConversationState) -> Dict[str, List[str]]:
+        """Group evidence by agent type based on metadata."""
+        agent_context = {
+            "repo_intelligence": [],
+            "code_inspector": [],
+            "other": []
+        }
+
+        for item in state.evidence_store:
+            agent_type = "other"
+            if item.metadata and "tool" in item.metadata:
+                tool_name = item.metadata["tool"]
+                if "repo" in tool_name.lower():
+                    agent_type = "repo_intelligence"
+                elif "code" in tool_name.lower():
+                    agent_type = "code_inspector"
+
+            if item.full_content:
+                agent_context[agent_type].append(item.full_content)
+
+        return agent_context
+
+    def _log_context_for_debugging(self, question: str, agent_context: Dict[str, List[str]]) -> None:
+        """Log the complete context for debugging purposes."""
+        debug_log("ResponderAgent", f"=== FINAL ANSWER CONTEXT ===")
+        debug_log("ResponderAgent", f"User Question: {question}")
+        debug_log("ResponderAgent", f"Total evidence items: {sum(len(answers) for answers in agent_context.values())}")
+
+        for agent_type, answers in agent_context.items():
+            if answers:
+                debug_log("ResponderAgent", f"**{agent_type.upper()} AGENT**")
+                debug_log("ResponderAgent", f"Answers collected: {len(answers)}")
+
+                for i, answer in enumerate(answers, 1):
+                    # Log first 500 chars of each answer
+                    preview = answer[:500] + "..." if len(answer) > 500 else answer
+                    debug_log("ResponderAgent", f"Answer {i} preview: {preview}")
+
+                debug_log("ResponderAgent", f"**END {agent_type.upper()} AGENT**")
+                debug_log("ResponderAgent", "")
+
+        debug_log("ResponderAgent", f"=== END CONTEXT ===")
+
+    def _generate_llm_response(self, question: str, agent_context: Dict[str, List[str]]) -> str:
+        """Generate final answer using LLM with structured context."""
+        try:
+            # Build structured prompt for LLM
+            prompt_parts = [
+                "You are an expert assistant helping to answer a user's question based on information gathered from different specialized agents.",
+                "",
+                f"USER QUESTION: {question}",
+                "",
+                "Below is the information gathered from different agents:",
+                ""
+            ]
+
+            # Add context from each agent type
+            for agent_type, answers in agent_context.items():
+                if answers:
+                    prompt_parts.append(f"**{agent_type.replace('_', ' ').upper()} AGENT**")
+                    for i, answer in enumerate(answers, 1):
+                        prompt_parts.append(f"Answer {i} from {agent_type} agent:")
+                        prompt_parts.append(answer)
+                        prompt_parts.append("")
+                    prompt_parts.append("")
+
+            prompt_parts.extend([
+                "INSTRUCTIONS:",
+                "1. Analyze all the information provided by the different agents",
+                "2. Synthesize a comprehensive answer to the user's question",
+                "3. Include relevant details from each agent's response",
+                "4. Make the answer clear, well-structured, and easy to understand",
+                "5. If there are conflicting answers, acknowledge the differences",
+                "",
+                "Provide a comprehensive answer based on all the agent responses above."
+            ])
+
+            prompt = "\n".join(prompt_parts)
+
+            # Save the full prompt in debug logs
+            debug_log("ResponderAgent", f"=== LLM PROMPT ===")
+            debug_log("ResponderAgent", prompt)
+            debug_log("ResponderAgent", f"=== END PROMPT ===")
+
+            # Make LLM call
+            want_tool, response = self.llm.generate(prompt)
+
+            if want_tool:
+                # If LLM wants to call a tool, return a message indicating this
+                return f"LLM requested tool call: {response.get('action', 'unknown')}"
+
+            # Extract the response content
+            if isinstance(response, dict) and "content" in response:
+                final_answer = response["content"].strip()
+            else:
+                final_answer = str(response).strip()
+
+            # Save the final answer in debug logs
+            debug_log("ResponderAgent", f"=== LLM RESPONSE ===")
+            debug_log("ResponderAgent", final_answer)
+            debug_log("ResponderAgent", f"=== END RESPONSE ===")
+
+            return final_answer
+
+        except Exception as e:
+            debug_log("ResponderAgent", f"LLM generation failed: {e}")
+            # Fallback to formatted response
+            return self._generate_formatted_response(question, agent_context)
+
+    def _generate_formatted_response(self, question: str, agent_context: Dict[str, List[str]]) -> str:
+        """Generate formatted response when LLM is not available."""
         parts = [f"Based on the evidence collected, here is the answer to: **{question}**"]
         parts.append("")
 
-        # Group evidence by relevance and synthesize
-        high_confidence_items = []
-        medium_confidence_items = []
-        low_confidence_items = []
-
-        debug_log("ResponderAgent", f"Processing {len(state.evidence_store)} evidence items")
-        for i, item in enumerate(state.evidence_store):
-            confidence = item.confidence or 0
-            debug_log("ResponderAgent", f"Evidence {i}: source='{item.source_path}', confidence={confidence:.3f}")
-
-            # Use full snippet content - prefer snippet over summary if both exist
-            content = item.snippet or item.summary or ""
-            debug_log("ResponderAgent", f"Evidence {i} content length: {len(content)} characters")
-
-            # Skip evidence items with high confidence but no content (corrupted data)
-            if confidence >= 0.8 and not content:
-                debug_log("ResponderAgent", f"SKIPPING Evidence {i}: high confidence ({confidence:.3f}) but no content!")
-                continue
-
-            if confidence >= 0.8:
-                high_confidence_items.append((item, content))
-            elif confidence >= 0.6:
-                medium_confidence_items.append((item, content))
-            elif confidence >= 0.4:  # Lower threshold for low confidence since we have full data
-                low_confidence_items.append((item, content))
-
-        # Add high confidence items first
-        if high_confidence_items:
-            parts.append("**Key findings:**")
-            for item, content in high_confidence_items[:3]:  # Limit to top 3
-                if content:
-                    # Show source path and full content
-                    source_info = f"From {item.source_path}:" if item.source_path else ""
-                    parts.append(f"- {source_info}")
-                    # Format the full content with proper line breaks
-                    formatted_content = content.replace('\n', '\n  ')
-                    parts.append(f"  {formatted_content}")
-            parts.append("")
-
-        # Add medium confidence items if needed
-        if medium_confidence_items and len(high_confidence_items) < 2:
-            parts.append("**Additional context:**")
-            for item, content in medium_confidence_items[:2]:  # Limit to top 2
-                if content:
-                    # Show source path and full content
-                    source_info = f"From {item.source_path}:" if item.source_path else ""
-                    parts.append(f"- {source_info}")
-                    # Format the full content with proper line breaks
-                    formatted_content = content.replace('\n', '\n  ')
-                    parts.append(f"  {formatted_content}")
-            parts.append("")
-
-        # Fall back to low-confidence observations if nothing stronger is available
-        if not (high_confidence_items or medium_confidence_items) and low_confidence_items:
-            parts.append("**Preliminary observations (low confidence):**")
-            for item, content in low_confidence_items[:2]:
-                if content:
-                    # Show source path and full content
-                    source_info = f"From {item.source_path}:" if item.source_path else ""
-                    parts.append(f"- {source_info}")
-                    # Format the full content with proper line breaks
-                    formatted_content = content.replace('\n', '\n  ')
-                    parts.append(f"  {formatted_content}")
-            parts.append("")
-
-        # Add source information if we have any evidence references
-        sources = set()
-        for item in state.evidence_store:
-            if item.source_path and item.source_path != "unknown":
-                sources.add(item.source_path)
-        
-        debug_log("ResponderAgent", f"Collected {len(sources)} unique sources")
-        for source in sorted(sources):
-            debug_log("ResponderAgent", f"Source: {source}")
-            
-        if sources:
-            parts.append("**Sources:**")
-            for source in list(sources)[:3]:  # Limit to top 3 sources
-                parts.append(f"- {source}")
+        # Add context from each agent type
+        for agent_type, answers in agent_context.items():
+            if answers:
+                agent_name = agent_type.replace('_', ' ').title()
+                parts.append(f"**{agent_name} Agent:**")
+                for i, answer in enumerate(answers, 1):
+                    parts.append(f"{i}. {answer}")
+                parts.append("")
 
         return "\n".join(parts)
 

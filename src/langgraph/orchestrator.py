@@ -6,6 +6,7 @@ import time
 from typing import Optional, List, Dict, Any
 
 from .state_models import ConversationState, Task, EvidenceItem
+from .agents.responder import FinalResponse
 
 
 class Orchestrator:
@@ -16,13 +17,37 @@ class Orchestrator:
         repo_agent,
         code_agent,
         verifier,
+        responder,
+        llm=None,
         max_iterations: int = 5,
     ) -> None:
         self.task_planner = task_planner
         self.repo_agent = repo_agent
         self.code_agent = code_agent
         self.verifier = verifier
+        self.responder = responder
+        self.llm = llm
         self.max_iterations = max_iterations
+
+        # Ensure all agents have access to LLM if available
+        if self.llm:
+            if hasattr(self.task_planner, 'llm'):
+                self.task_planner.llm = self.llm
+            # TaskPlannerAgent uses 'simple_client' attribute for OpenAI client
+            if hasattr(self.task_planner, 'simple_client'):
+                self.task_planner.simple_client = self.llm
+
+            if hasattr(self.verifier, 'llm'):
+                self.verifier.llm = self.llm
+
+            if hasattr(self.repo_agent, 'llm'):
+                self.repo_agent.llm = self.llm
+
+            if hasattr(self.code_agent, 'llm'):
+                self.code_agent.llm = self.llm
+
+            if hasattr(self.responder, 'llm'):
+                self.responder.llm = self.llm
 
     def run(self, state: ConversationState, live_log=None) -> tuple[object, List[Dict[str, Any]]]:
         iteration = 0
@@ -70,7 +95,7 @@ class Orchestrator:
                     iteration_entry["repo_agent"] = {
                         "items_collected": len(evidence),
                         "duration_sec": round(elapsed, 3),
-                        "total_content_length": sum(len(item.snippet or item.summary or "") for item in evidence),
+                        "total_content_length": sum(len(item.full_content) for item in evidence),
                     }
                     self._log(
                         live_log,
@@ -86,7 +111,7 @@ class Orchestrator:
                     iteration_entry["code_agent"] = {
                         "items_collected": len(evidence),
                         "duration_sec": round(elapsed, 3),
-                        "total_content_length": sum(len(item.snippet or item.summary or "") for item in evidence),
+                        "total_content_length": sum(len(item.full_content) for item in evidence),
                     }
                     self._log(
                         live_log,
@@ -100,7 +125,7 @@ class Orchestrator:
             if total_added:
                 self._log(
                     live_log,
-                    f"Evidence collection summary: {total_added} item(s) gathered this iteration",
+                    f"Evidence collection: {total_added} item(s) gathered this iteration",
                 )
 
             self._log(live_log, "Verifier agent evaluating coverage")
@@ -117,7 +142,21 @@ class Orchestrator:
                 live_log,
                 f"Verifier coverage={getattr(report, 'coverage_score', 0):.2f} evaluated in {elapsed:.2f}s",
             )
-            final_report = report
+
+            # Generate final answer using responder
+            self._log(live_log, "Responder agent generating final answer")
+            start = time.perf_counter()
+            final_response = self.responder.respond(state)
+            elapsed = time.perf_counter() - start
+            iteration_entry["responder"] = {
+                "duration_sec": round(elapsed, 3),
+                "response_length": len(final_response.message),
+            }
+            self._log(
+                live_log,
+                f"Final answer generated in {elapsed:.2f}s ({len(final_response.message)} chars)",
+            )
+            final_report = final_response
 
             iteration_entry["total_evidence_items"] = len(state.evidence_store)
             timeline.append(iteration_entry)

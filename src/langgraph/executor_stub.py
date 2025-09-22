@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from .state_models import ConversationState
 from .orchestrator import Orchestrator
-from .agents import TaskPlannerAgent, RepoIntelligenceAgent, CodeInspectorAgent, VerifierAgent
+from .agents import TaskPlannerAgent, RepoIntelligenceAgent, CodeInspectorAgent, VerifierAgent, ResponderAgent
 from .tool_nodes.base import ToolNodeAdapter
 
 
@@ -29,6 +29,7 @@ def build_detailed_executor(tool_manager: Any, live_log=None) -> Orchestrator:
     repo_agent = RepoIntelligenceAgent(tool_nodes)
     code_agent = CodeInspectorAgent()
     verifier = VerifierAgent(coverage_threshold=0.7)
+    responder = ResponderAgent()
 
     # Create orchestrator
     orchestrator = Orchestrator(
@@ -36,6 +37,7 @@ def build_detailed_executor(tool_manager: Any, live_log=None) -> Orchestrator:
         repo_agent=repo_agent,
         code_agent=code_agent,
         verifier=verifier,
+        responder=responder,
         max_iterations=5,
     )
 
@@ -97,8 +99,7 @@ def execute_turn(
             execution_context["evidence_collection"] = [
                 {
                     "source_path": item.source_path,
-                    "summary": item.summary,
-                    "snippet": item.snippet,
+                    "full_content": item.full_content,
                     "citations": item.citations,
                     "confidence": item.confidence,
                     "metadata": item.metadata,

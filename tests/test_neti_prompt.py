@@ -142,7 +142,6 @@ def main():
     # Test 3: Non-repository question
     non_repo_success = test_non_repo_question(llm)
     
-    # Summary
     print("\n" + "=" * 50)
     print("📊 FINAL RESULTS:")
     print("=" * 50)

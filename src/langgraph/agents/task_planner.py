@@ -7,7 +7,7 @@ import time
 from typing import List, Tuple, Optional, Dict, Any
 
 from ..state_models import ConversationState, Task
-from ...llm_module.llm_builder import build_llm
+from src.llm_module.llm_builder import build_llm
 
 
 class TaskPlannerAgent:
@@ -98,35 +98,63 @@ class TaskPlannerAgent:
     def _plan_with_llm(self, question: str, state: ConversationState) -> List[Task]:
         """Use LLM to intelligently plan tasks based on the question."""
         try:
-            prompt = f"""Analyze this user question and determine what types of research tasks are needed to provide a comprehensive answer.
+            prompt = f"""You are an expert Task Planning Agent for a comprehensive code repository analysis system. Your role is to break down complex user questions into specific, actionable research tasks that will gather all necessary information to provide a complete answer.
 
+## Your Goals:
+- Analyze the user's question to understand their exact information needs
+- Create a strategic plan using multiple specialized agents
+- Prioritize tasks that will provide the most valuable evidence
+- Ensure comprehensive coverage of all aspects mentioned in the question
+- Balance between breadth (overview) and depth (specific details) as needed
+
+## Available Specialized Agents:
+1. **repo_research** - Repository Intelligence Agent
+   - Searches repository contents, documentation, and codebase
+   - Finds relevant files, functions, and implementation patterns
+   - Extracts contextual information from multiple sources
+   - Best for: understanding overall structure, finding examples, documentation
+
+2. **code_context** - Code Inspector Agent
+   - Analyzes specific code files and functions
+   - Provides detailed code implementations
+   - Extracts specific algorithms or patterns
+   - Best for: deep code analysis, implementation details, API usage
+
+3. **documentation_search** - Documentation Specialist Agent
+   - Focuses on README files, API docs, guides
+   - Extracts tutorial information and setup instructions
+   - Best for: learning paths, configuration guides, conceptual explanations
+
+4. **configuration_analysis** - Configuration Expert Agent
+   - Analyzes config files, deployment settings, environment setup
+   - Understands build processes and deployment configurations
+   - Best for: setup instructions, environment requirements, deployment guides
+
+## Analysis Guidelines:
+- **Technical Questions**: Usually need both repo_research AND code_context
+- **Implementation Questions**: Prioritize code_context with supporting repo_research
+- **Setup/Configuration Questions**: Focus on documentation_search and configuration_analysis
+- **Conceptual Questions**: Start with repo_research for context, then code examples
+- **Multi-part Questions**: Create separate tasks for each distinct aspect
+
+## Task Creation Rules:
+- **Be Specific**: Each task should have a clear, focused objective
+- **Set Priorities**: Use 1-10 scale (10 = critical, 1 = nice-to-have)
+- **Limit Quantity**: Maximum 3-4 tasks per question to avoid overwhelming the system
+- **Sequence Properly**: Higher priority tasks should come first
+- **Consider Dependencies**: Some tasks may need results from others
+
+## Question Analysis:
 User Question: {question}
 
-Available Task Types:
-1. repo_research - Gather repository-level context, documentation, and relevant code snippets
-2. code_context - Collect specific code implementations, functions, or classes
-3. documentation_search - Find README files, API docs, or help documentation
-4. configuration_analysis - Analyze configuration files, settings, or deployment files
+## Task Planning Strategy:
+1. Identify the main topic and any sub-topics mentioned
+2. Determine what type of information is most critical
+3. Consider what agents are best suited for each information need
+4. Prioritize tasks based on importance and logical sequence
+5. Ensure tasks cover all aspects of the question comprehensively
 
-Consider:
-- What specific information does the user need?
-- What types of evidence would be most helpful?
-- Are they asking about implementation details, configuration, or general concepts?
-- Do they need code examples or just conceptual explanations?
-
-Respond with a JSON array of tasks. Each task should have:
-- type: one of the available task types
-- description: clear description of what to research
-- priority: integer (1-10, higher = more important)
-
-Example response:
-[
-  {{
-    "type": "repo_research",
-    "description": "Search for existing implementations and usage patterns",
-    "priority": 8
-  }}
-]
+Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive coverage of the user's question.
 """
 
             # Call LLM to get task plan

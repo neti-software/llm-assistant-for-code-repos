@@ -111,8 +111,7 @@ class CodeInspectorAgent:
             evidence.append(
                 EvidenceItem(
                     source_path=target_path,
-                    snippet=snippet,
-                    summary=snippet,  # Store full snippet as summary for consistency with full data approach
+                    full_content=snippet,  # Complete agent answer
                     citations=[citations[idx]] if idx < len(citations) else [],
                     confidence=confidence,
                     metadata={

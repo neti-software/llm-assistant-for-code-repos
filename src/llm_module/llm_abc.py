@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from src.utils.helper import SingletonABCMeta
 
 
@@ -10,6 +10,17 @@ class LLMABC(ABC, metaclass=SingletonABCMeta):
         self.config = config
 
     @abstractmethod
-    def generate(self, prompt: str, **kwargs) -> str:
-        """Generate text from LLM."""
+    def generate(self, prompt: str, **kwargs) -> Tuple[bool, Dict[str, Any]]:
+        """Generate text from LLM.
+
+        Args:
+            prompt: The prompt to generate from
+            **kwargs: Additional arguments including:
+                - json_schema: dict for structured JSON output
+                - response_format: dict for structured output format
+
+        Returns:
+            Tuple of (want_tool: bool, response: dict)
+            want_tool is True if the LLM wants to call a tool, False for direct response
+        """
         pass

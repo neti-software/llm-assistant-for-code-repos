@@ -5,7 +5,7 @@ import signal
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, Request
@@ -335,11 +335,15 @@ class LocalLLM(LLMABC):
         self._wait_for_server(timeout_s=30.0)
 
     @execution_profiler
-    def generate(self, prompt: Optional[str] = None, **kwargs) -> str:
+    def generate(self, prompt: Optional[str] = None, **kwargs) -> Tuple[bool, Dict[str, Any]]:
         """
         Supports either a raw 'prompt' OR OpenAI-style 'messages'.
         When 'messages' is provided, we build a minimal chat prompt that
         ends with a single 'Assistant:' cue and pass stop tokens through.
+
+        Returns:
+            Tuple of (want_tool: bool, response: dict)
+            want_tool is always False for local LLM (no tool calling support)
         """
         payload = {
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
@@ -389,11 +393,19 @@ class LocalLLM(LLMABC):
 
         data = r.json()
         choice = data["choices"][0]
+        content = ""
         if "text" in choice and choice["text"] is not None:
-            return choice["text"].strip()
-        if "message" in choice and "content" in choice["message"]:
-            return choice["message"]["content"].strip()
-        return json.dumps(choice).strip()
+            content = choice["text"].strip()
+        elif "message" in choice and "content" in choice["message"]:
+            content = choice["message"]["content"].strip()
+        else:
+            content = json.dumps(choice).strip()
+
+        # Return in the same format as CloudLLM: (want_tool, response_dict)
+        return False, {
+            "action": "response",
+            "content": content
+        }
 
     def shutdown(self):
         if getattr(self, "server_proc", None):

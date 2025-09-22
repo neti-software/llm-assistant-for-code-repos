@@ -152,9 +152,7 @@ class GitHubOrgDownloader:
             else:
                 failed += 1
         
-        # Summary
         print(f"\n{'='*50}")
-        print(f"Download Summary:")
         print(f"Total repositories: {len(filtered_repos)}")
         print(f"Successfully downloaded: {successful}")
         print(f"Failed: {failed}")
