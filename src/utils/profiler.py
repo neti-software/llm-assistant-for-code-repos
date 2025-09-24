@@ -24,6 +24,7 @@ class ExecutionProfiler:
             return
         self._execution_times: Dict[str, List[float]] = {}
         self._decorated_functions: List[str] = []
+        self._events: List[Dict[str, Any]] = []
         self._initialized = True
 
     # ---------------- Decorator ----------------
@@ -74,10 +75,25 @@ class ExecutionProfiler:
                 )
 
     # ---------------- Maintenance ----------------
+    def record_event(self, name: str, **metadata: Any) -> None:
+        """Record a profiling event with arbitrary metadata."""
+
+        self._events.append(
+            {
+                "name": name,
+                "timestamp": time.time(),
+                "metadata": metadata,
+            }
+        )
+
+    def iter_events(self) -> List[Dict[str, Any]]:
+        return list(self._events)
+
     def clean(self) -> None:
         """Reset profiler state."""
         self._execution_times.clear()
         self._decorated_functions.clear()
+        self._events.clear()
 
 
 # ---------------- Other decorators ----------------

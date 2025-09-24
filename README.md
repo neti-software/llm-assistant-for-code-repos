@@ -109,6 +109,31 @@ streamlit run main_streamlit.py
 
 ---
 
+## 7. LangGraph Preview (Optional)
+
+1. Set `use_langgraph_multi_agent: true` in `configs/llm_config.yaml` to activate the LangGraph-based flow.
+2. Run the CLI or Streamlit commands above—when the flag is enabled the console shows LangGraph planning messages.
+3. Verify the LangGraph end-to-end pipeline by running the bundled helper:
+
+   ```bash
+   python run_tests.py
+   ```
+
+   (runs all LangGraph unit and integration suites inside the project virtualenv).
+
+4. Run the curated benchmark questions (optional):
+
+   ```bash
+   python benchmarks/run_langgraph_benchmark.py             # LangGraph preview (stub)
+   python benchmarks/run_langgraph_benchmark.py --mode legacy  # Legacy pipeline
+   ```
+
+   Results are written to `benchmarks/langgraph_benchmark_results.json`.
+
+The LangGraph preview runs a first-cut multi-agent executor (no LLM reasoning yet). Expect rapid iterations as the remaining guardrail and parity work lands.
+
+---
+
 ## PromptLayer Integration
 
 - Add `PROMPT_LAYER_API_KEY` to a `.env` file in the repo root.

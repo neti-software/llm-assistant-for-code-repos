@@ -105,13 +105,17 @@ Phase 0 – Baseline and Safety Nets
 - Add a feature flag to keep legacy execution path available during rollout.
 
 Phase 1 – Foundations
+- ✅ Implemented initial shared state scaffolding via dataclasses in `src/langgraph/state_models.py` plus conversation adapters (LG-01).
 - Add dependencies: langgraph, langchain-core, langchain-openai (or OpenRouter integration), pydantic v2.
 - Define shared schemas (`GraphState`, `Evidence`, `CodeSnippet`, `ActionEvent`).
 - Centralize config: keep key files under `configs/*.yaml`; add env var overrides.
 
 Phase 2 – Wrap Tools as Nodes
+- ✅ Added base `ToolNodeAdapter`, `ToolManager.list_tools`, and pytest coverage to normalise tool payloads (LG-02).
 - Implement Repo Surface, Code Search, Reader, Patch, AST nodes with typed I/O and structured logging.
 - Implement Embedding and VectorDB nodes (read from `qdrant_config.yaml`, `qdrant_api_key.yaml`).
+- ✅ Repo Intelligence agent consuming adapters now produces structured evidence with tests (`src/langgraph/agents/repo_intelligence.py`).
+- ✅ Code Inspector agent converts targeted file retrieval into evidence with tests (`src/langgraph/agents/code_inspector.py`).
 
 Phase 3 – Subgraphs and Parallelism
 - Build Inspection, Search, and Retrieval subgraphs; enable parallel execution where independent.
@@ -119,20 +123,28 @@ Phase 3 – Subgraphs and Parallelism
 
 Phase 4 – Supervisor and Policy
 - Implement Supervisor with heuristic routing and stopping criteria.
+- ✅ Heuristic Task Planner agent emits repo/code tasks with pytest coverage (LG-05 scaffolding).
 - Define node edges explicitly; ensure backpressure and loop caps (max tool cycles).
+- ✅ Verifier agent generates coverage reports and stores findings on state (`src/langgraph/agents/verifier.py`).
+- ✅ Orchestrator coordinates planner, specialists, and verifier with iteration caps (`src/langgraph/orchestrator.py`).
 
 Phase 5 – Synthesis and Output
 - Implement Synthesis Agent that compiles answer, selects code snippets, and adds citations.
 - Ensure outputs meet UX needs: concise summary + examples + explicit sources.
+- ✅ Responder agent formats final answers and writes to conversation history (`src/langgraph/agents/responder.py`).
 
 Phase 6 – CLI Integration
+- ✅ Flag-gated LangGraph runner stub in `main_cli.py` using `LangGraphRunner` (LG-03).
 - Update `main_cli.py` to run the graph, stream intermediate events, and support modes: `--explain`, `--dry-run`, `--legacy`.
 - Add structured logs and a simple TUI progress view (optional).
+- ✅ CLI now emits LangGraph progress messages and profiler events when the feature flag is enabled (`main_cli.py`, `src/utils/profiler.py`).
+- ✅ LangGraph executor routes planner → specialists → verifier → responder, replacing the stub (`src/langgraph/executor.py`).
 
 Phase 7 – Tests and Parity
 - Unit tests per node with fixtures (small repos, fake qdrant, deterministic LLM stubs).
 - E2E tests: ask multi-file questions; assert evidence and answer structure.
 - Parity tests against legacy outputs for key prompts.
+- ✅ Initial LangGraph integration test covering stubbed end-to-end flow (`tests/integration/test_langgraph_stub_flow.py`).
 
 Phase 8 – Performance and Caching
 - Content cache by content hash; memoize embeddings; avoid duplicate reads.
@@ -142,9 +154,6 @@ Phase 8 – Performance and Caching
 Phase 9 – Telemetry and Observability
 - Structured JSON logs for each ActionEvent; optional OpenTelemetry spans.
 - Audit trail: store state snapshots per cycle for debugging.
-
-Phase 10 – Rollout and Deprecation
-- Default to LangGraph path; retain `--legacy` for one release; document removal timeline.
 
 ## Data Model Sketches (documentation only)
 

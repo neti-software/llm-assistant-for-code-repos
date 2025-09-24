@@ -7,6 +7,8 @@ from src.tools_to_call.tool_manager import ToolManager
 from src.conversation.conversation_history import ConversationHistory
 from src.utils.helper import load_yaml
 from src.utils.profiler import execution_profiler, time_it
+from src.langgraph.runner import LangGraphRunner
+from src.langgraph.executor import execute_turn as langgraph_executor
 
 st.set_page_config(page_title="LLM Chat", layout="wide")
 
@@ -60,6 +62,7 @@ class StreamlitChat:
 
         # init core
         self.llm = build_llm(llm_config)
+        self.use_langgraph = llm_config.get("use_langgraph_multi_agent", False)
         manager_qdrant_vector_db = ManagerQdrantVectorDb(
             config=qdrant_config,
             embedding_config=embedding_config,
@@ -72,6 +75,13 @@ class StreamlitChat:
         self.tool_manager.add_tool_pointer("rag_search_project_readme", manager_qdrant_vector_db.search_project_readme)
         self.conversation_history = ConversationHistory(conversation_history_config)
 
+        self.runner = LangGraphRunner(
+            use_graph=self.use_langgraph,
+            legacy_llm_loop=self._legacy_llm_loop,
+        )
+        if self.use_langgraph:
+            self.runner.set_graph_executor(langgraph_executor)
+
     # unified logger -> terminal + live UI
     def _log(self, live_log: Callable[[str], None], msg: str, role: str = "trace") -> None:
         print(msg)
@@ -79,7 +89,7 @@ class StreamlitChat:
 
     @time_it
     @execution_profiler
-    def run_llm_loop(self, live_log: Callable[[str, str], None]) -> Dict[str, Any]:
+    def _legacy_llm_loop(self, live_log: Callable[[str, str], None]) -> Dict[str, Any]:
         iteration = 0
         while True:
             self._log(live_log, f"**ITERATION {iteration}**", "trace")
@@ -119,16 +129,43 @@ class StreamlitChat:
         # record user turn
         self.conversation_history.add_user_question(question)
 
-        # run inner loop
-        resp = self.run_llm_loop(live_log)
+        if self.use_langgraph:
+            live_log("**LangGraph: planning tasks...**", "trace")
+            response = self.runner.run_turn(
+                self.llm,
+                self.tool_manager,
+                self.conversation_history,
+                live_log=lambda msg: live_log(f"**{msg}**", "trace"),
+            )
+            message, _ = self._extract_message_and_citations(response)
+            live_log("**LangGraph Response**", "trace")
+            live_log(_md_code("", message), "trace")
+            self.conversation_history.add_model_response(message)
+            self.conversation_history.save()
+            execution_profiler.print_info()
+            execution_profiler.clean()
+            return message
 
-        # record final model turn
+        # legacy inner loop
+        resp = self._legacy_llm_loop(live_log)
         self.conversation_history.add_model_response(resp)
         self.conversation_history.save()
-
         execution_profiler.print_info()
         execution_profiler.clean()
         return resp
+
+    def _extract_message_and_citations(self, response: Any) -> tuple[str, list]:
+        if response is None:
+            return "", []
+        if isinstance(response, str):
+            return response, []
+        if hasattr(response, "message"):
+            return getattr(response, "message"), getattr(response, "citations", [])
+        if isinstance(response, dict):
+            message = response.get("message") or response.get("response") or str(response)
+            citations = response.get("citations", [])
+            return message, citations
+        return str(response), []
 
 
 # ---------- streamlit UI ----------

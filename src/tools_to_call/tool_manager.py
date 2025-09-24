@@ -1,4 +1,4 @@
-from typing import Any, Dict, Callable
+from typing import Any, Dict, Callable, List
 import inspect
 from pathlib import Path
 
@@ -19,6 +19,8 @@ class ToolManager:
             "search_files_with_grep": search_files_with_grep,
         }
 
+        self._tool_metadata: Dict[str, Dict[str, Any]] = {}
+
         # tools that require root injection
         self._tools_requiring_root = [
             "fetch_file_from_patch",
@@ -28,6 +30,14 @@ class ToolManager:
 
         # Guardian check
         self._check_tools_requiring_root()
+
+        # Populate tool metadata for built-in tools
+        for tool_name in self.tools:
+            self._tool_metadata[tool_name] = {
+                "name": tool_name,
+                "callable": self.tools[tool_name],
+                "requires_root": tool_name in self._tools_requiring_root,
+            }
 
     def _check_tools_requiring_root(self):
         """Ensure all tools in _tools_requiring_root accept a `root` parameter."""
@@ -90,7 +100,14 @@ class ToolManager:
         except Exception as e:
             return {"error": f"Tool '{action}' failed: {e}"}
 
-    def add_tool_pointer(self, name: str, func: Callable[..., Any]) -> None:
+    def add_tool_pointer(
+        self,
+        name: str,
+        func: Callable[..., Any],
+        *,
+        requires_root: bool = False,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
         """
         Dynamically add a new tool to the manager.
 
@@ -103,4 +120,28 @@ class ToolManager:
         if name in self.tools:
             raise ValueError(f"Tool '{name}' already exists in the registry.")
         self.tools[name] = func
+        if requires_root and name not in self._tools_requiring_root:
+            self._tools_requiring_root.append(name)
+        entry = {
+            "name": name,
+            "callable": func,
+            "requires_root": requires_root,
+        }
+        if metadata:
+            entry.update(metadata)
+        self._tool_metadata[name] = entry
         print(f"✅ Registered new tool: {name}")
+
+    def list_tools(self) -> List[Dict[str, Any]]:
+        """Return metadata about registered tools."""
+
+        return [
+            {
+                **{
+                    key: value
+                    for key, value in entry.items()
+                    if key != "callable"
+                }
+            }
+            for entry in self._tool_metadata.values()
+        ]
