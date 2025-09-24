@@ -1,6 +1,6 @@
 type: "cloud"
 provider: "openrouter" # Can be "openai" or "openrouter"
-model: "google/gemini-2.5-flash"
+model: "openai/gpt-4.1"
 context_length: 1000000
 max_completion_tokens: 4000
 tool_choice: "auto"
