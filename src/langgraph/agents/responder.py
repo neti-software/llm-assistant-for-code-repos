@@ -17,16 +17,22 @@ class FinalResponse:
 
 
 class ResponderAgent:
-    def __init__(self, llm_config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        llm_config: Optional[Dict[str, Any]] = None,
+        llm: Optional[Any] = None,
+    ) -> None:
         self.llm_config = llm_config
-        self.llm = None
-        if llm_config:
+        self.llm = llm
+        if self.llm is None and llm_config:
             self.llm = build_llm(llm_config)
 
     def respond(self, state: ConversationState) -> FinalResponse:
         # Get the original question to provide context
         question = self._get_latest_question(state)
-        
+
+        if not self.llm:
+            raise RuntimeError("ResponderAgent requires an LLM configuration. None was provided.")
 
         # If we have evidence, synthesize a focused response
         if state.evidence_store:
@@ -44,6 +50,7 @@ class ResponderAgent:
 
         return FinalResponse(message=response_text, citations=list(dict.fromkeys(citations)))
 
+
     def _get_latest_question(self, state: ConversationState) -> str:
         """Extract the latest user question from the state."""
         if state.conversation.history:
@@ -58,6 +65,8 @@ class ResponderAgent:
 
     def _synthesize_response(self, state: ConversationState, question: str) -> str:
         """Generate final answer using LLM with structured context from all agents."""
+        assert self.llm is not None, "LLM must be configured"
+        
         if not state.evidence_store:
             return f"Insufficient evidence to answer: {question}"
 
@@ -67,12 +76,8 @@ class ResponderAgent:
         # Log the complete context for debugging
         self._log_context_for_debugging(question, agent_context)
 
-        # Use LLM to generate final answer if available
-        if self.llm:
-            return self._generate_llm_response(question, agent_context)
-
-        # Fallback to formatted response if no LLM
-        return self._generate_formatted_response(question, agent_context)
+        # Generate final answer using LLM
+        return self._generate_llm_response(question, agent_context)
 
     def _group_evidence_by_agent(self, state: ConversationState) -> Dict[str, List[str]]:
         """Group evidence by agent type based on metadata."""
@@ -119,85 +124,64 @@ class ResponderAgent:
 
     def _generate_llm_response(self, question: str, agent_context: Dict[str, List[str]]) -> str:
         """Generate final answer using LLM with structured context."""
-        try:
-            # Build structured prompt for LLM
-            prompt_parts = [
-                "You are an expert assistant helping to answer a user's question based on information gathered from different specialized agents.",
-                "",
-                f"USER QUESTION: {question}",
-                "",
-                "Below is the information gathered from different agents:",
-                ""
-            ]
-
-            # Add context from each agent type
-            for agent_type, answers in agent_context.items():
-                if answers:
-                    prompt_parts.append(f"**{agent_type.replace('_', ' ').upper()} AGENT**")
-                    for i, answer in enumerate(answers, 1):
-                        prompt_parts.append(f"Answer {i} from {agent_type} agent:")
-                        prompt_parts.append(answer)
-                        prompt_parts.append("")
-                    prompt_parts.append("")
-
-            prompt_parts.extend([
-                "INSTRUCTIONS:",
-                "1. Analyze all the information provided by the different agents",
-                "2. Synthesize a comprehensive answer to the user's question",
-                "3. Include relevant details from each agent's response",
-                "4. Make the answer clear, well-structured, and easy to understand",
-                "5. If there are conflicting answers, acknowledge the differences",
-                "",
-                "Provide a comprehensive answer based on all the agent responses above."
-            ])
-
-            prompt = "\n".join(prompt_parts)
-
-            # Save the full prompt in debug logs
-            debug_log("ResponderAgent", f"=== LLM PROMPT ===")
-            debug_log("ResponderAgent", prompt)
-            debug_log("ResponderAgent", f"=== END PROMPT ===")
-
-            # Make LLM call
-            want_tool, response = self.llm.generate(prompt)
-
-            if want_tool:
-                # If LLM wants to call a tool, return a message indicating this
-                return f"LLM requested tool call: {response.get('action', 'unknown')}"
-
-            # Extract the response content
-            if isinstance(response, dict) and "content" in response:
-                final_answer = response["content"].strip()
-            else:
-                final_answer = str(response).strip()
-
-            # Save the final answer in debug logs
-            debug_log("ResponderAgent", f"=== LLM RESPONSE ===")
-            debug_log("ResponderAgent", final_answer)
-            debug_log("ResponderAgent", f"=== END RESPONSE ===")
-
-            return final_answer
-
-        except Exception as e:
-            debug_log("ResponderAgent", f"LLM generation failed: {e}")
-            # Fallback to formatted response
-            return self._generate_formatted_response(question, agent_context)
-
-    def _generate_formatted_response(self, question: str, agent_context: Dict[str, List[str]]) -> str:
-        """Generate formatted response when LLM is not available."""
-        parts = [f"Based on the evidence collected, here is the answer to: **{question}**"]
-        parts.append("")
+        assert self.llm is not None, "LLM must be configured for _generate_llm_response"
+        # Build structured prompt for LLM
+        prompt_parts = [
+            "You are an expert assistant helping to answer a user's question based on information gathered from different specialized agents.",
+            "",
+            f"USER QUESTION: {question}",
+            "",
+            "Below is the information gathered from different agents:",
+            ""
+        ]
 
         # Add context from each agent type
         for agent_type, answers in agent_context.items():
             if answers:
-                agent_name = agent_type.replace('_', ' ').title()
-                parts.append(f"**{agent_name} Agent:**")
+                prompt_parts.append(f"**{agent_type.replace('_', ' ').upper()} AGENT**")
                 for i, answer in enumerate(answers, 1):
-                    parts.append(f"{i}. {answer}")
-                parts.append("")
+                    prompt_parts.append(f"Answer {i} from {agent_type} agent:")
+                    prompt_parts.append(answer)
+                    prompt_parts.append("")
+                prompt_parts.append("")
 
-        return "\n".join(parts)
+        prompt_parts.extend([
+            "INSTRUCTIONS:",
+            "1. Analyze all the information provided by the different agents",
+            "2. Synthesize a comprehensive answer to the user's question",
+            "3. Include relevant details from each agent's response",
+            "4. Make the answer clear, well-structured, and easy to understand",
+            "5. If there are conflicting answers, acknowledge the differences",
+            "",
+            "Provide a comprehensive answer based on all the agent responses above."
+        ])
+
+        prompt = "\n".join(prompt_parts)
+
+        # Save the full prompt in debug logs
+        debug_log("ResponderAgent", f"=== LLM PROMPT ===")
+        debug_log("ResponderAgent", prompt)
+        debug_log("ResponderAgent", f"=== END PROMPT ===")
+
+        # Make LLM call
+        want_tool, response = self.llm.generate(prompt)
+
+        if want_tool:
+            # If LLM wants to call a tool, return a message indicating this
+            return f"LLM requested tool call: {response.get('action', 'unknown')}"
+
+        # Extract the response content
+        if isinstance(response, dict) and "content" in response:
+            final_answer = response["content"].strip()
+        else:
+            final_answer = str(response).strip()
+
+        # Save the final answer in debug logs
+        debug_log("ResponderAgent", f"=== LLM RESPONSE ===")
+        debug_log("ResponderAgent", final_answer)
+        debug_log("ResponderAgent", f"=== END RESPONSE ===")
+
+        return final_answer
 
     def persist_response(self, conversation_history, response: FinalResponse) -> None:
         conversation_history.add_model_response(response.message)

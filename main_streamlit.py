@@ -1,6 +1,8 @@
 import json
-import streamlit as st
+from functools import partial
 from typing import Any, Dict, Callable
+
+import streamlit as st
 from src.llm_module.llm_builder import build_llm
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
@@ -63,6 +65,8 @@ class StreamlitChat:
         # init core
         self.llm = build_llm(llm_config)
         self.use_langgraph = llm_config.get("use_langgraph_multi_agent", False)
+        raw_max_iterations = llm_config.get("langgraph_max_iterations", 4)
+        self.langgraph_max_iterations = raw_max_iterations if isinstance(raw_max_iterations, int) and raw_max_iterations > 0 else 4
         manager_qdrant_vector_db = ManagerQdrantVectorDb(
             config=qdrant_config,
             embedding_config=embedding_config,
@@ -80,12 +84,19 @@ class StreamlitChat:
             legacy_llm_loop=self._legacy_llm_loop,
         )
         if self.use_langgraph:
-            self.runner.set_graph_executor(langgraph_executor)
+            self.runner.set_graph_executor(
+                partial(langgraph_executor, max_iterations=self.langgraph_max_iterations)
+            )
 
     # unified logger -> terminal + live UI
-    def _log(self, live_log: Callable[[str], None], msg: str, role: str = "trace") -> None:
-        print(msg)
-        live_log(msg, role)
+    def _log(self, live_log: Callable[[str, str], None], msg: str, role: str = "trace") -> None:
+        if not live_log:
+            return
+
+        trimmed = msg.strip()
+        if role == "trace" and len(trimmed) > 600:
+            trimmed = trimmed[:600] + "\n… [truncated]"
+        live_log(trimmed, role)
 
     @time_it
     @execution_profiler
@@ -131,15 +142,21 @@ class StreamlitChat:
 
         if self.use_langgraph:
             live_log("**LangGraph: planning tasks...**", "trace")
+
+            def _graph_log(msg: str) -> None:
+                trimmed = msg.strip()
+                if len(trimmed) > 600:
+                    trimmed = trimmed[:600] + "\n… [truncated]"
+                live_log(f"**{trimmed}**", "trace")
+
             response = self.runner.run_turn(
                 self.llm,
                 self.tool_manager,
                 self.conversation_history,
-                live_log=lambda msg: live_log(f"**{msg}**", "trace"),
+                live_log=_graph_log,
             )
             message, _ = self._extract_message_and_citations(response)
-            live_log("**LangGraph Response**", "trace")
-            live_log(_md_code("", message), "trace")
+            live_log("**LangGraph response ready**", "trace")
             self.conversation_history.add_model_response(message)
             self.conversation_history.save()
             execution_profiler.print_info()

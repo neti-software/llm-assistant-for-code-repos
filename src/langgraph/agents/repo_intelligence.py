@@ -10,7 +10,7 @@ from ..debug_logger import debug_log
 
 
 class RepoIntelligenceAgent:
-    """Collect repository-level evidence using registered tool nodes with LLM-based analysis."""
+    """Collect repository-level evidence using registered tool nodes."""
 
     def __init__(self, tool_nodes: Sequence[Any], llm=None):
         self.tool_nodes = list(tool_nodes)
@@ -75,6 +75,7 @@ class RepoIntelligenceAgent:
                     item_confidence = 1.0
                 evidence_items.append(
                     EvidenceItem(
+                        full_content=item,
                         source_path=item,
                         citations=[citations[idx]] if idx < len(citations) else [],
                         confidence=item_confidence,
@@ -151,59 +152,3 @@ class RepoIntelligenceAgent:
         debug_log("RepoIntelligence", f"Returning raw snippet content ({len(snippet)} characters)")
         return snippet
 
-    def _extract_with_llm(self, snippet: str, source_path: str, query: str) -> str:
-        """Use LLM to extract and summarize key information from content."""
-        try:
-            prompt = f"""You are an expert Content Analysis Agent specializing in extracting relevant information from code and documentation. Your role is to:
-
-## Primary Goals:
-1. **Identify the most relevant content** that addresses the user's query
-2. **Extract key technical details** and implementation information
-3. **Provide context** about how this content relates to the overall question
-4. **Highlight actionable information** like code examples, configurations, or procedures
-5. **Maintain accuracy** while focusing on the most important details
-
-## Analysis Guidelines:
-- **Query Relevance**: How does this content address the specific question?
-- **Technical Depth**: Does it contain implementation details, API usage, or configuration?
-- **Practical Value**: Are there code examples, setup instructions, or usage patterns?
-- **Context Quality**: Does it provide background or relate to other components?
-
-## Content to Analyze:
-**Source**: {source_path}
-**Query**: {query}
-
-**Content**:
-{snippet}
-
-## Extraction Instructions:
-1. Focus on content that directly addresses the query
-2. Extract code examples, API calls, and configuration details
-3. Identify setup instructions, requirements, and dependencies
-4. Note any limitations, alternatives, or related concepts mentioned
-5. Preserve technical accuracy while highlighting key information
-
-Provide a structured analysis that captures the most valuable information for answering the query.
-"""
-
-            want_tool, response = self.llm.generate(prompt)
-            if want_tool:
-                # Fallback to original snippet
-                return snippet
-
-            if isinstance(response, dict) and "content" in response:
-                response_content = response["content"]
-            else:
-                response_content = str(response)
-
-            # Clean up the response
-            if response_content and len(response_content.strip()) > 50:
-                debug_log("RepoIntelligence", f"LLM extracted key information ({len(response_content)} characters)")
-                return response_content.strip()
-
-        except Exception as e:
-            debug_log("RepoIntelligence", f"LLM extraction failed: {e}")
-
-        # Fallback to full snippet
-        debug_log("RepoIntelligence", f"Falling back to full snippet content ({len(snippet)} characters)")
-        return snippet

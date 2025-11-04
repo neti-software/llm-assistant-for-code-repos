@@ -164,12 +164,16 @@ class ManagerQdrantVectorDb:
                                                                   hits=minimalized_results,
                                                                   top_k=initial_top_k)
 
-        # 6) Print nicely
-        print(f"\n🏆 Global Top {initial_top_k} Results:")
-        for rank, hit in enumerate(minimalized_results, start=1):
-            sc = hit["score"]
-            sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
+        summary = [
+            {
+                "rank": rank,
+                "project": hit["project"],
+                "path": hit["path_to_file"],
+                "score": hit["score"],
+            }
+            for rank, hit in enumerate(minimalized_results, start=1)
+        ]
+        logger.debug("Top %d search results: %s", initial_top_k, summary)
 
         logger.info("Top results prepared. returning %d items", len(top_results))
         return minimalized_results
@@ -256,12 +260,16 @@ class ManagerQdrantVectorDb:
                                                                   hits=minimalized_results,
                                                                   top_k=initial_top_k)
 
-        # 6) Print nicely
-        print(f"\n🏆 Global Top {initial_top_k} Results:")
-        for rank, hit in enumerate(minimalized_results, start=1):
-            sc = hit["score"]
-            sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
+        summary = [
+            {
+                "rank": rank,
+                "project": hit["project"],
+                "path": hit["path_to_file"],
+                "score": hit["score"],
+            }
+            for rank, hit in enumerate(minimalized_results, start=1)
+        ]
+        logger.debug("Top %d README results: %s", initial_top_k, summary)
 
         logger.info("Top README results prepared. returning %d items", len(top_results))
         return minimalized_results

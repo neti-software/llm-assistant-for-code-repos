@@ -18,13 +18,8 @@ def test_verifier_with_filecoin_question():
     llm_config = load_yaml("configs/llm_config.yaml")
 
     # Build LLM
-    try:
-        llm = build_llm(llm_config)
-        print(f"[TEST] Built LLM: {llm}")
-    except Exception as e:
-        print(f"[TEST] Failed to build LLM: {e}")
-        print("[TEST] Testing with None LLM (will fallback to rule-based)")
-        llm = None
+    llm = build_llm(llm_config)
+    print(f"[TEST] Built LLM: {llm}")
 
     # Create verifier
     verifier = VerifierAgent(llm=llm)
@@ -33,17 +28,23 @@ def test_verifier_with_filecoin_question():
     evidence_items = [
         EvidenceItem(
             source_path="filecoin-docs/basics/how-storage-works/filecoin-plus.md",
+            full_content=(
+                "Filecoin Plus program explanation including DataCap tokens and verified deals. "
+                "DataCap is a token paid to storage providers as part of a deal in which the client "
+                "and the data they are storing is verified by a Filecoin Plus allocator."
+            ),
             confidence=0.9,
-            summary="Filecoin Plus program explanation including DataCap tokens and verified deals",
-            snippet="DataCap is a token paid to storage providers as part of a deal in which the client and the data they are storing is verified by a Filecoin Plus allocator.",
-            citations=["filecoin-docs/basics/how-storage-works/filecoin-plus.md"]
+            citations=["filecoin-docs/basics/how-storage-works/filecoin-plus.md"],
         ),
         EvidenceItem(
             source_path="filecoin-docs/storage-providers/filecoin-deals/verified-deals.md",
+            full_content=(
+                "Detailed explanation of verified deals and DataCap allocation. "
+                "A deal becomes verified after the data owner completes a verification process "
+                "where allocators assess the client's use case."
+            ),
             confidence=0.85,
-            summary="Detailed explanation of verified deals and DataCap allocation",
-            snippet="A deal becomes verified after the data owner completes a verification process where allocators assess the client's use case.",
-            citations=["filecoin-docs/storage-providers/filecoin-deals/verified-deals.md"]
+            citations=["filecoin-docs/storage-providers/filecoin-deals/verified-deals.md"],
         )
     ]
 
@@ -58,23 +59,17 @@ def test_verifier_with_filecoin_question():
     print(f"[TEST] Evidence items: {len(evidence_items)}")
 
     # Run verifier
-    try:
-        report = verifier.evaluate(state, question=question)
+    report = verifier.evaluate(state, question=question)
 
-        print(f"[TEST] Coverage score: {report.coverage_score:.3f}")
-        print(f"[TEST] Missing items: {report.missing_items}")
-        print(f"[TEST] Citations: {len(report.citations)}")
-        print("[TEST] Response text:")
-        print("-" * 50)
-        print(report.response_text)
-        print("-" * 50)
+    print(f"[TEST] Coverage score: {report.coverage_score:.3f}")
+    print(f"[TEST] Missing items: {report.missing_items}")
+    print(f"[TEST] Citations: {len(report.citations)}")
+    print("[TEST] Response text:")
+    print("-" * 50)
+    print(report.response_text)
+    print("-" * 50)
 
-        print("[TEST] SUCCESS: Verifier generated structured response!")
-
-    except Exception as e:
-        print(f"[TEST] ERROR: Verifier failed: {e}")
-        import traceback
-        traceback.print_exc()
+    print("[TEST] SUCCESS: Verifier generated structured response!")
 
 
 if __name__ == "__main__":

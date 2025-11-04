@@ -37,11 +37,7 @@ def state():
     return ConversationState(conversation=buffer)
 
 
-def test_execute_turn_returns_final_response(state):
+def test_execute_turn_requires_llm(state):
     tool_manager = DummyToolManager()
-    result = execute_turn(llm=None, tool_manager=tool_manager, state=state)
-
-    assert "response" in result
-    final_response = result["response"]
-    assert "Final Answer" in final_response.message
-    assert "src/foo.py" in final_response.message or "Foo" in final_response.message
+    with pytest.raises(RuntimeError):
+        execute_turn(llm=None, tool_manager=tool_manager, state=state)

@@ -395,7 +395,7 @@ class CloudLLM(LLMABC):
             }
 
     @execution_profiler
-    def generate(self, user_input: str) -> Tuple[bool, Dict[str, Any]]:
+    def generate(self, user_input: str, **kwargs) -> Tuple[bool, Dict[str, Any]]:
         """
         Generate a response using OpenAI Chat Completions API.
 
@@ -408,6 +408,16 @@ class CloudLLM(LLMABC):
         """
         # Prompt messages are determined by PromptLayer template when enabled
 
+        response_format_override = kwargs.pop("response_format", None)
+        json_schema_override = kwargs.pop("json_schema", None)
+        max_tokens_override = kwargs.pop("max_tokens", None)
+        if max_tokens_override is None:
+            max_tokens_override = kwargs.pop("max_completion_tokens", None)
+        temperature_override = kwargs.pop("temperature", None)
+        stop_sequences = kwargs.pop("stop", None)
+        tools_override = kwargs.pop("tools", None)
+        tool_choice_override = kwargs.pop("tool_choice", None)
+
         # --- response_format ---
         response_format = None
         if self.prompt_config.get("output_schema"):
@@ -419,21 +429,56 @@ class CloudLLM(LLMABC):
                 "json_schema": schema,
             }
 
+        if response_format_override is not None:
+            response_format = response_format_override
+        elif json_schema_override:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": json_schema_override,
+            }
+
         tools = convert_tools(self.prompt_config.get("tools") or [])  # type: ignore
+        if tools_override is not None:
+            tools = tools_override  # type: ignore
         resp: Optional[Any] = None
         result: Optional[Dict[str, Any]] = None
 
+        tool_choice_to_use = tool_choice_override if tool_choice_override is not None else self.tool_choice
+        max_completion_tokens = max_tokens_override or self.max_completion_tokens
+
+        completion_kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "max_completion_tokens": max_completion_tokens,
+        }
+        # Backwards compatibility with legacy max_tokens param when explicitly provided
+        if max_tokens_override is not None:
+            completion_kwargs["max_tokens"] = max_completion_tokens
+
+        if temperature_override is not None:
+            completion_kwargs["temperature"] = temperature_override
+        if stop_sequences is not None:
+            completion_kwargs["stop"] = stop_sequences
+        if tools_override is not None or tools:
+            completion_kwargs["tools"] = tools  # type: ignore
+        if tool_choice_to_use:
+            completion_kwargs["tool_choice"] = tool_choice_to_use
+        if response_format is not None:
+            completion_kwargs["response_format"] = response_format  # type: ignore
+        if kwargs:
+            completion_kwargs.update(kwargs)
 
 
         promptlayer_disabled = os.getenv("DISABLE_PROMPTLAYER", "").lower() in ("1", "true", "yes")
         if self.pl_client is not None and not promptlayer_disabled:
-            overrides: Dict[str, Any] = {
-                "model": self.model,
-                "tools": tools if tools else None,
-                "tool_choice": self.tool_choice,
-                "response_format": response_format if response_format else None,
+            overrides = {
+                "model": completion_kwargs.get("model"),
+                "tools": completion_kwargs.get("tools"),
+                "tool_choice": completion_kwargs.get("tool_choice"),
+                "response_format": completion_kwargs.get("response_format"),
                 # Use OpenAI SDK-compatible arg when routing via PromptLayer
-                "max_tokens": self.max_completion_tokens,
+                "max_tokens": completion_kwargs.get("max_completion_tokens") or completion_kwargs.get("max_tokens"),
+                "temperature": completion_kwargs.get("temperature"),
+                "stop": completion_kwargs.get("stop"),
             }
             overrides = {k: v for k, v in overrides.items() if v is not None}
 
@@ -486,12 +531,8 @@ class CloudLLM(LLMABC):
                         messages_to_use = messages_from_template
 
                     resp = self.client.chat.completions.create(
-                        model=self.model,
                         messages=messages_to_use,  # type: ignore
-                        max_completion_tokens=self.max_completion_tokens,
-                        tools=tools,  # type: ignore
-                        tool_choice=self.tool_choice,
-                        response_format=response_format,  # type: ignore
+                        **completion_kwargs,
                     )
                 else:
                     resp = result.get("raw_response") if isinstance(result, dict) else None
@@ -505,12 +546,8 @@ class CloudLLM(LLMABC):
                             {"role": "user", "content": user_input},
                         ]
                         resp = self.client.chat.completions.create(
-                            model=self.model,
                             messages=fallback_messages,  # type: ignore
-                            max_completion_tokens=self.max_completion_tokens,
-                            tools=tools,  # type: ignore
-                            tool_choice=self.tool_choice,
-                            response_format=response_format,  # type: ignore
+                            **completion_kwargs,
                         )
 
         else:
@@ -520,24 +557,16 @@ class CloudLLM(LLMABC):
                 {"role": "user", "content": user_input},
             ]
             resp = self.client.chat.completions.create(
-                model=self.model,
                 messages=messages,  # type: ignore
-                max_completion_tokens=self.max_completion_tokens,
-                tools=tools,  # type: ignore
-                tool_choice=self.tool_choice,
-                response_format=response_format,  # type: ignore
+                **completion_kwargs,
             )
 
 
         if resp is None:
             fallback_messages = _build_messages_from_promptlayer(result, self.prompt_config, user_input)
             resp = self.client.chat.completions.create(
-                model=self.model,
                 messages=fallback_messages,  # type: ignore
-                max_completion_tokens=self.max_completion_tokens,
-                tools=tools,  # type: ignore
-                tool_choice=self.tool_choice,
-                response_format=response_format,  # type: ignore
+                **completion_kwargs,
             )
 
 
