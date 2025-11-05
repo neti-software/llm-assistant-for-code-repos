@@ -172,33 +172,14 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
             else:
                 return []
 
-            # Parse LLM response
-            try:
-                # Try to extract JSON from response
-                response_clean = response_text.strip()
-                logger.debug(f"Response clean length: {len(response_clean)}")
+            # Parse LLM response using simplified extraction
+            tasks_data = self._extract_json_from_response(response_text)
+            
+            if not tasks_data:
+                logger.warning("No valid JSON tasks extracted from LLM response")
+                return []
 
-                if "```json" in response_clean:
-                    response_clean = response_clean.split("```json")[1].split("```")[0]
-                    logger.debug("Extracted JSON from ```json markers")
-                elif "```" in response_clean:
-                    response_clean = response_clean.split("```")[1].split("```")[0]
-                    logger.debug("Extracted JSON from ``` markers")
-
-                logger.debug(f"Final clean response: {response_clean[:200]}...")
-                tasks_data = json.loads(response_clean)
-                if not isinstance(tasks_data, list):
-                    tasks_data = []
-
-                logger.debug(f"Successfully parsed {len(tasks_data)} tasks")
-
-            except json.JSONDecodeError as e:
-                logger.warning(f"JSON parsing failed: {e}")
-                logger.debug(f"Failed response: {response_clean[:200]}...")
-                # Fallback: parse simple text response
-                tasks_data = self._parse_text_response(response_text)
-                logger.debug(f"Fallback text parsing returned: {len(tasks_data)} tasks")
-
+            logger.debug(f"Successfully parsed {len(tasks_data)} tasks")
             return self._create_tasks_from_llm_plan(tasks_data, question)
 
         except Exception as e:
@@ -396,6 +377,59 @@ Generate gap-filling tasks now:"""
 
         logger.debug(f"Created {len(tasks)} tasks from LLM plan")
         return tasks
+
+    def _extract_json_from_response(self, response_text: str) -> List[Dict[str, Any]]:
+        """Extract and parse JSON from LLM response text.
+        
+        Attempts to extract valid JSON from various response formats:
+        1. Direct JSON array
+        2. JSON wrapped in ```json markers
+        3. JSON wrapped in ``` markers
+        
+        Args:
+            response_text: Raw response text from LLM
+            
+        Returns:
+            List of task dictionaries parsed from JSON, or empty list if parsing fails
+        """
+        import json
+        import re
+        
+        try:
+            response_clean = response_text.strip()
+            logger.debug(f"Response length: {len(response_clean)}")
+            
+            # Try to extract JSON from code blocks
+            if "```json" in response_clean:
+                response_clean = response_clean.split("```json")[1].split("```")[0]
+                logger.debug("Extracted JSON from ```json markers")
+            elif "```" in response_clean:
+                response_clean = response_clean.split("```")[1].split("```")[0]
+                logger.debug("Extracted JSON from ``` markers")
+            
+            logger.debug(f"Clean response preview: {response_clean[:200]}...")
+            
+            # Parse JSON
+            tasks_data = json.loads(response_clean)
+            
+            # Ensure we have a list
+            if isinstance(tasks_data, dict) and "tasks" in tasks_data:
+                tasks_data = tasks_data["tasks"]
+            
+            if not isinstance(tasks_data, list):
+                logger.warning(f"Expected list but got {type(tasks_data).__name__}")
+                return []
+            
+            logger.debug(f"Successfully parsed {len(tasks_data)} tasks from JSON")
+            return tasks_data
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            logger.debug(f"Failed to parse: {response_clean[:200] if 'response_clean' in locals() else response_text[:200]}")
+            return []
+        except Exception as e:
+            logger.error(f"Error extracting JSON: {e}")
+            return []
 
     def _extract_latest_question(self, state: ConversationState) -> str | None:
         if state.conversation.history:
