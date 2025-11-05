@@ -2,19 +2,32 @@ import pytest
 
 from src.langgraph.state_models import ConversationState, EvidenceItem
 from src.langgraph.agents.responder import ResponderAgent
+from tests.stubs.simple_llm import StubLLM
 
 
 @pytest.fixture
 def agent():
-    return ResponderAgent()
+    return ResponderAgent(llm=StubLLM())
 
 
 def build_state():
     state = ConversationState()
     state.evidence_store.extend(
         [
-            EvidenceItem(source_path="src/foo.py", snippet="class Foo", citations=["file:0"], confidence=0.8),
-            EvidenceItem(source_path="docs/README.md", summary="Foo overview", citations=["rag:0"], confidence=0.7),
+            EvidenceItem(
+                full_content="class Foo:\n    pass",
+                source_path="src/foo.py",
+                citations=["file:0"],
+                confidence=0.8,
+                metadata={"tool": "repo_search"},
+            ),
+            EvidenceItem(
+                full_content="Foo overview documentation",
+                source_path="docs/README.md",
+                citations=["rag:0"],
+                confidence=0.7,
+                metadata={"tool": "rag_search"},
+            ),
         ]
     )
     state.control_flags.last_verifier_report = {

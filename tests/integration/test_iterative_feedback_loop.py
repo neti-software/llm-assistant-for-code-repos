@@ -14,7 +14,8 @@ from src.langgraph.agents.code_inspector import CodeInspectorAgent
 from src.langgraph.agents.verifier import VerifierAgent
 from src.langgraph.agents.responder import ResponderAgent
 from src.langgraph.orchestrator import Orchestrator
-from src.langgraph.state_models import ConversationState, ConversationBuffer, EvidenceItem
+from src.langgraph.state_models import ConversationState, ConversationBuffer
+from tests.stubs.simple_llm import StubLLM
 
 
 class StubToolNode:
@@ -133,9 +134,10 @@ def test_iterative_feedback_loop_with_low_coverage():
     code_agent = CodeInspectorAgent(structure_node=structure_node, file_node=file_node)
     
     # Use a lower coverage threshold to ensure iteration
-    task_planner = TaskPlannerAgent()
-    verifier = VerifierAgent(coverage_threshold=0.7)
-    responder = ResponderAgent()
+    llm = StubLLM(coverage_sequence=[0.4, 0.8])
+    task_planner = TaskPlannerAgent(llm=llm)
+    verifier = VerifierAgent(coverage_threshold=0.7, llm=llm)
+    responder = ResponderAgent(llm=llm)
     
     orchestrator = Orchestrator(
         task_planner=task_planner,
@@ -144,6 +146,7 @@ def test_iterative_feedback_loop_with_low_coverage():
         verifier=verifier,
         responder=responder,
         max_iterations=3,
+        llm=llm,
     )
     
     state = build_state("Explain the Foo class implementation in detail")
@@ -220,9 +223,10 @@ def test_task_planner_creates_tasks_after_first_iteration():
     )
     code_agent = CodeInspectorAgent(structure_node=structure_node, file_node=file_node)
     
-    task_planner = TaskPlannerAgent()
-    verifier = VerifierAgent(coverage_threshold=0.7)
-    responder = ResponderAgent()
+    llm = StubLLM(coverage_sequence=[0.4, 0.8])
+    task_planner = TaskPlannerAgent(llm=llm)
+    verifier = VerifierAgent(coverage_threshold=0.7, llm=llm)
+    responder = ResponderAgent(llm=llm)
     
     orchestrator = Orchestrator(
         task_planner=task_planner,
@@ -231,6 +235,7 @@ def test_task_planner_creates_tasks_after_first_iteration():
         verifier=verifier,
         responder=responder,
         max_iterations=3,
+        llm=llm,
     )
     
     state = build_state("What is Foo?")

@@ -27,7 +27,12 @@ class FakeRepoAgent:
     def run(self, state, *, query):
         self.calls += 1
         state.evidence_store.append(
-            EvidenceItem(source_path="src/foo.py", summary="Foo class", citations=["search:0"], confidence=0.8)
+            EvidenceItem(
+                full_content="Foo class summary",
+                source_path="src/foo.py",
+                citations=["search:0"],
+                confidence=0.8,
+            )
         )
         return state, list(state.evidence_store)
 
@@ -39,7 +44,12 @@ class FakeCodeAgent:
     def run(self, state, *, task):
         self.calls += 1
         state.evidence_store.append(
-            EvidenceItem(source_path="src/foo.py", snippet="class Foo", citations=["file:0"], confidence=0.9)
+            EvidenceItem(
+                full_content="class Foo:\n    pass",
+                source_path="src/foo.py",
+                citations=["file:0"],
+                confidence=0.9,
+            )
         )
         task.status = "done"
         return state, [state.evidence_store[-1]]

@@ -2,11 +2,12 @@ import pytest
 
 from src.langgraph.state_models import ConversationState, EvidenceItem
 from src.langgraph.agents.verifier import VerifierAgent
+from tests.stubs.simple_llm import StubLLM
 
 
 @pytest.fixture
 def agent():
-    return VerifierAgent(coverage_threshold=0.6)
+    return VerifierAgent(coverage_threshold=0.6, llm=StubLLM())
 
 
 def build_state_with_evidence():
@@ -14,15 +15,14 @@ def build_state_with_evidence():
     state.evidence_store.extend(
         [
             EvidenceItem(
+                full_content="Foo class handles requests\nclass Foo:\n    pass",
                 source_path="src/foo.py",
-                summary="Foo class handles requests",
-                snippet="class Foo:\n    pass",
                 confidence=0.8,
                 citations=["search:0"],
             ),
             EvidenceItem(
+                full_content="Overview of Foo architecture",
                 source_path="docs/README.md",
-                summary="Overview of Foo architecture",
                 confidence=0.7,
                 citations=["rag:0"],
             ),

@@ -2,6 +2,12 @@ import pytest
 
 from src.langgraph.state_models import ConversationState, Task, ConversationBuffer
 from src.langgraph.agents.task_planner import TaskPlannerAgent
+from tests.stubs.simple_llm import StubLLM
+
+
+@pytest.fixture
+def planner():
+    return TaskPlannerAgent(llm=StubLLM())
 
 
 @pytest.fixture
@@ -14,8 +20,7 @@ def base_state():
     return state
 
 
-def test_task_planner_generates_repo_and_code_tasks(base_state):
-    planner = TaskPlannerAgent()
+def test_task_planner_generates_repo_and_code_tasks(base_state, planner):
     updated_state, new_tasks = planner.plan(base_state)
 
     assert len(new_tasks) == 2
@@ -32,9 +37,7 @@ def test_task_planner_generates_repo_and_code_tasks(base_state):
     assert any(t.id == code_task.id for t in updated_state.tasks)
 
 
-def test_task_planner_skips_duplicate_pending_tasks(base_state):
-    planner = TaskPlannerAgent()
-
+def test_task_planner_skips_duplicate_pending_tasks(base_state, planner):
     existing_task = Task(
         id="task-1",
         type="repo_research",
@@ -59,7 +62,7 @@ def test_task_planner_handles_non_specific_question():
     )
     state = ConversationState(conversation=buffer)
 
-    planner = TaskPlannerAgent()
+    planner = TaskPlannerAgent(llm=StubLLM())
     updated_state, new_tasks = planner.plan(state)
 
     assert len(new_tasks) == 1
@@ -92,7 +95,7 @@ def test_task_planner_creates_new_tasks_when_previous_tasks_done():
         "missing_items": ["Need more implementation details"],
     }
 
-    planner = TaskPlannerAgent()
+    planner = TaskPlannerAgent(llm=StubLLM())
     updated_state, new_tasks = planner.plan(state)
 
     # Should create new tasks because existing task is done
@@ -134,7 +137,7 @@ def test_task_planner_creates_new_tasks_when_previous_tasks_skipped():
         "missing_items": ["Need code examples", "Need usage patterns"],
     }
 
-    planner = TaskPlannerAgent()
+    planner = TaskPlannerAgent(llm=StubLLM())
     updated_state, new_tasks = planner.plan(state)
 
     # Should create new tasks because existing tasks are skipped
@@ -163,7 +166,7 @@ def test_task_planner_blocks_duplicate_active_tasks():
     )
     state.tasks.append(existing_task)
 
-    planner = TaskPlannerAgent()
+    planner = TaskPlannerAgent(llm=StubLLM())
     updated_state, new_tasks = planner.plan(state)
 
     # Should NOT create new tasks because there's an active task
@@ -189,7 +192,7 @@ def test_task_planner_blocks_duplicate_in_progress_tasks():
     )
     state.tasks.append(existing_task)
 
-    planner = TaskPlannerAgent()
+    planner = TaskPlannerAgent(llm=StubLLM())
     updated_state, new_tasks = planner.plan(state)
 
     # Should NOT create new tasks because there's an in_progress task

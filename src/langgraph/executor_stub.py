@@ -15,7 +15,7 @@ from .agents import TaskPlannerAgent, RepoIntelligenceAgent, CodeInspectorAgent,
 from .tool_nodes.base import ToolNodeAdapter
 
 
-def build_detailed_executor(tool_manager: Any, live_log=None) -> Orchestrator:
+def build_detailed_executor(tool_manager: Any, live_log=None, llm=None) -> Orchestrator:
     """Build a fully configured orchestrator with all agents and tools."""
 
     # Build tool nodes
@@ -25,11 +25,11 @@ def build_detailed_executor(tool_manager: Any, live_log=None) -> Orchestrator:
             tool_nodes.append(ToolNodeAdapter(tool_manager, tool_name))
 
     # Create agents
-    task_planner = TaskPlannerAgent()
-    repo_agent = RepoIntelligenceAgent(tool_nodes)
+    task_planner = TaskPlannerAgent(llm=llm)
+    repo_agent = RepoIntelligenceAgent(tool_nodes, llm=llm)
     code_agent = CodeInspectorAgent()
-    verifier = VerifierAgent(coverage_threshold=0.7)
-    responder = ResponderAgent()
+    verifier = VerifierAgent(coverage_threshold=0.7, llm=llm)
+    responder = ResponderAgent(llm=llm)
 
     # Create orchestrator
     orchestrator = Orchestrator(
@@ -39,6 +39,7 @@ def build_detailed_executor(tool_manager: Any, live_log=None) -> Orchestrator:
         verifier=verifier,
         responder=responder,
         max_iterations=5,
+        llm=llm,
     )
 
     return orchestrator
@@ -63,7 +64,7 @@ def execute_turn(
     }
 
     # Build orchestrator
-    orchestrator = build_detailed_executor(tool_manager, live_log)
+    orchestrator = build_detailed_executor(tool_manager, live_log, llm=llm)
 
     # Run orchestrator and capture detailed execution data
     try:
