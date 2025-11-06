@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.utils.helper import load_yaml  # noqa: E402
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb  # noqa: E402
 from src.vector_db.helpers_vector_db import assemble_function_docs_generic  # noqa: E402
+from src.utils.profiler import set_progress_context, clear_progress_context  # noqa: E402
 
 
 def _load_manager() -> ManagerQdrantVectorDb:
@@ -114,13 +115,21 @@ def ingest_directories(
         # Use the org folder name as prefix if requested
         org_prefix = org_dir.name if use_org_prefix else None
         
-        if use_org_prefix:
-            print(f"\n=== Processing {org_dir} (prefix: {org_prefix}) ===")
-        else:
-            print(f"\n=== Processing {org_dir} ===")
+        # Count total repos upfront
+        repo_roots = list(_iter_repo_roots(org_dir))
+        total_repos = len(repo_roots)
         
-        for repo_root in _iter_repo_roots(org_dir):
+        if use_org_prefix:
+            print(f"\n=== Processing {org_dir} (prefix: {org_prefix}) - {total_repos} repos ===")
+        else:
+            print(f"\n=== Processing {org_dir} - {total_repos} repos ===")
+        
+        for repo_idx, repo_root in enumerate(repo_roots, start=1):
+            collection_name = f"{org_prefix}-{repo_root.name}" if org_prefix else repo_root.name
+            set_progress_context(repo_root.name, repo_idx, total_repos)
             _process_repo(manager, repo_root, skip_existing, overwrite_existing, org_prefix)
+        
+        clear_progress_context()
         print(f"--- Finished {org_dir} ---")
 
 
