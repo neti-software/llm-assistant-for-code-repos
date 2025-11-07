@@ -5,7 +5,7 @@ from src.vector_db.helpers_vector_db import assemble_function_docs_generic
 from src.embedding_module.emmbeding_builder import EmbeddingBuilder
 from src.reranker_module.voyager_reranker import VoyagerReranker
 from src.vector_db.qdrant_vector_db import QdrantVectorDB
-from src.utils.profiler import execution_profiler, time_it
+from src.utils.profiler import execution_profiler, time_it, set_progress_context, clear_progress_context
 from src.utils.logger import logger
 from qdrant_client.http import models as rest
 from pathlib import Path
@@ -42,13 +42,16 @@ class ManagerQdrantVectorDb:
     @execution_profiler
     def create_vector_db_from_dir(self, root_repos_dir):
         repos_dir = [d for d in glob.glob(os.path.join(root_repos_dir, "*/")) if os.path.isdir(d)]
-        logger.info("Scanning root_repos_dir=%s found %d repos", root_repos_dir, len(repos_dir))
+        total_repos = len(repos_dir)
+        logger.info("Scanning root_repos_dir=%s found %d repos", root_repos_dir, total_repos)
         # cnt = 0
-        for repo_path in tqdm(map(Path, repos_dir), desc="Processing repos"):
+        for repo_idx, repo_path in enumerate(map(Path, repos_dir), start=1):
             # cnt +=1
             # if cnt < 134:
             #     continue
             repo_root = Path(repo_path).resolve()
+            repo_name = repo_root.name
+            set_progress_context(repo_name, repo_idx, total_repos)
             logger.info("Processing repo: %s", repo_root)
             metadata_map = self.metadata_extractor_manager.process_repo(repo_root)
             logger.debug("Metadata extracted for %s: %d entries", repo_root.name, len(metadata_map))
@@ -65,6 +68,8 @@ class ManagerQdrantVectorDb:
                                                                overwrite_existing=False)
 
             logger.info("Collection created for repo %s", repo_root.name)
+        
+        clear_progress_context()
 
     @time_it
     @execution_profiler
@@ -164,12 +169,16 @@ class ManagerQdrantVectorDb:
                                                                   hits=minimalized_results,
                                                                   top_k=initial_top_k)
 
-        # 6) Print nicely
-        print(f"\n🏆 Global Top {initial_top_k} Results:")
-        for rank, hit in enumerate(minimalized_results, start=1):
-            sc = hit["score"]
-            sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
+        summary = [
+            {
+                "rank": rank,
+                "project": hit["project"],
+                "path": hit["path_to_file"],
+                "score": hit["score"],
+            }
+            for rank, hit in enumerate(minimalized_results, start=1)
+        ]
+        logger.debug("Top %d search results: %s", initial_top_k, summary)
 
         logger.info("Top results prepared. returning %d items", len(top_results))
         return minimalized_results
@@ -256,12 +265,16 @@ class ManagerQdrantVectorDb:
                                                                   hits=minimalized_results,
                                                                   top_k=initial_top_k)
 
-        # 6) Print nicely
-        print(f"\n🏆 Global Top {initial_top_k} Results:")
-        for rank, hit in enumerate(minimalized_results, start=1):
-            sc = hit["score"]
-            sc_txt = f"{sc:.4f}" if sc is not None else "None"
-            print(f"  {rank}. [{hit['project']}] {hit['path_to_file']} = {hit['value']}  (score={sc_txt})")
+        summary = [
+            {
+                "rank": rank,
+                "project": hit["project"],
+                "path": hit["path_to_file"],
+                "score": hit["score"],
+            }
+            for rank, hit in enumerate(minimalized_results, start=1)
+        ]
+        logger.debug("Top %d README results: %s", initial_top_k, summary)
 
         logger.info("Top README results prepared. returning %d items", len(top_results))
         return minimalized_results

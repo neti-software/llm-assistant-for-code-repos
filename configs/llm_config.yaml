@@ -8,3 +8,4 @@ path_to_api_key: "configs/openrouter_key.yaml"
 path_to_prompt_config: "configs/prompt_config.yaml"
 base_url: "https://openrouter.ai/api/v1"
 use_langgraph_multi_agent: true
+langgraph_max_iterations: 3

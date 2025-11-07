@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, List
+from typing import Any, List, Optional
 
 from .state_models import ConversationState
 from .tool_nodes.base import ToolNodeAdapter
@@ -14,6 +14,8 @@ from .agents.verifier import VerifierAgent
 from .agents.responder import ResponderAgent, FinalResponse
 from .orchestrator import Orchestrator
 
+DEFAULT_MAX_ITERATIONS = 4
+
 
 def _maybe_tool(tool_manager, name: str):
     if hasattr(tool_manager, "tools") and name in tool_manager.tools:
@@ -21,8 +23,16 @@ def _maybe_tool(tool_manager, name: str):
     return None
 
 
-def execute_turn(llm: Any, tool_manager: Any, state: ConversationState, live_log=None) -> dict:
+def execute_turn(
+    llm: Any,
+    tool_manager: Any,
+    state: ConversationState,
+    live_log=None,
+    max_iterations: Optional[int] = None,
+) -> dict:
     """Execute the LangGraph agents and return the final response plus updated state."""
+    iteration_budget = max_iterations if isinstance(max_iterations, int) and max_iterations > 0 else DEFAULT_MAX_ITERATIONS
+    state.control_flags.max_iterations = iteration_budget
 
     planner = TaskPlannerAgent()
     # Pass the LLM client directly to the planner
@@ -50,7 +60,7 @@ def execute_turn(llm: Any, tool_manager: Any, state: ConversationState, live_log
         verifier=verifier,
         responder=responder,
         llm=llm,
-        max_iterations=4,
+        max_iterations=iteration_budget,
     )
 
     # Capture detailed execution context

@@ -1,3 +1,5 @@
+from functools import partial
+
 from src.llm_module.llm_builder import build_llm
 from src.vector_db.manager_qdrant_vector_db import ManagerQdrantVectorDb
 from src.tools_to_call.tool_manager import ToolManager
@@ -15,7 +17,7 @@ init(autoreset=True)
 
 
 def build_core():
-    """Return initialized llm, tool_manager, conversation_history, and flag."""
+    """Return initialized llm, tool manager, history, LangGraph flag, and iteration cap."""
     print(f"{Fore.CYAN}Loading configuration files...{Style.RESET_ALL}")
 
     llm_config = load_yaml("configs/llm_config.yaml")
@@ -87,8 +89,11 @@ def build_core():
 
     print(f"{Fore.CYAN}Core initialization complete.{Style.RESET_ALL}")
     use_langgraph_multi_agent = llm_config.get("use_langgraph_multi_agent", False)
+    langgraph_max_iterations = llm_config.get("langgraph_max_iterations", 4)
+    if not isinstance(langgraph_max_iterations, int) or langgraph_max_iterations < 1:
+        langgraph_max_iterations = 4
 
-    return llm, tool_manager, conversation_history, use_langgraph_multi_agent
+    return llm, tool_manager, conversation_history, use_langgraph_multi_agent, langgraph_max_iterations
 
 
 @time_it
@@ -192,14 +197,22 @@ def chat_loop(user_question, llm, tool_manager, conversation_history, runner: La
 
 
 def main():
-    llm, tool_manager, conversation_history, use_langgraph_multi_agent = build_core()
+    (
+        llm,
+        tool_manager,
+        conversation_history,
+        use_langgraph_multi_agent,
+        langgraph_max_iterations,
+    ) = build_core()
     runner = LangGraphRunner(
         use_graph=use_langgraph_multi_agent,
         legacy_llm_loop=llm_loop,
     )
 
     if use_langgraph_multi_agent:
-        runner.set_graph_executor(langgraph_executor)
+        runner.set_graph_executor(
+            partial(langgraph_executor, max_iterations=langgraph_max_iterations)
+        )
 
     while True:
         user_question = input(f"{Fore.BLUE}USER QUESTION:{Style.RESET_ALL} ")

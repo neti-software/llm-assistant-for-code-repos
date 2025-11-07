@@ -26,8 +26,9 @@ class CodeInspectorAgent:
         if self.structure_node is not None:
             try:
                 self.structure_node.invoke(root=project_root)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[ERROR] CodeInspectorAgent: Structure node invocation failed: {e}")
+                raise
 
         # If no target paths provided, try to extract them from existing evidence
         if not target_paths:
@@ -40,14 +41,15 @@ class CodeInspectorAgent:
         for path in target_paths:
             if self.file_node is None:
                 continue
-            try:
-                result = self.file_node.invoke(
-                    file_path=path,
-                    question=task.metadata.get("input_question"),
-                )
-            except Exception:
-                continue
+            
+            result = self.file_node.invoke(
+                file_path=path,
+                question=task.metadata.get("input_question"),
+            )
+            
             if result.get("error"):
+                error_msg = result.get("error")
+                print(f"[ERROR] CodeInspectorAgent: File node returned error for {path}: {error_msg}")
                 continue
 
             payload = result.get("data")
@@ -92,26 +94,38 @@ class CodeInspectorAgent:
 
         evidence: List[EvidenceItem] = []
         for idx, item in enumerate(payload_items):
-            snippet = None
             line_start = None
             line_end = None
             score = None
+            full_content: str
 
             if isinstance(item, str):
-                snippet = item
+                full_content = item
             elif isinstance(item, dict):
-                snippet = item.get("snippet") or item.get("content")
+                # Use full content from result, prefer 'content' or 'full_content', fallback to entire dict as JSON
+                extracted = item.get("content") or item.get("full_content")
+                if extracted:
+                    full_content = str(extracted)
+                else:
+                    # Use entire dict as JSON string for full context (not snippets)
+                    import json
+                    full_content = json.dumps(item, indent=2)
                 line_start = item.get("line_start")
                 line_end = item.get("line_end")
                 score = item.get("score")
             else:
+                # Convert to string for full context
+                full_content = str(item)
+
+            # Skip empty content
+            if not full_content.strip():
                 continue
 
-            # Create evidence item with full snippet content - no summarization
+            # Create evidence item with full context content
             evidence.append(
                 EvidenceItem(
                     source_path=target_path,
-                    full_content=snippet,  # Complete agent answer
+                    full_content=full_content,
                     citations=[citations[idx]] if idx < len(citations) else [],
                     confidence=confidence,
                     metadata={

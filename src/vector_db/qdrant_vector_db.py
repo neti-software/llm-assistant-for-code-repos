@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Optional, Sequence, Union, Any
 import uuid
+import time
 from tqdm import tqdm
 import numpy as np
 
@@ -237,8 +238,14 @@ class QdrantVectorDB:
 
         zero_vecs = {k: [0.0] * vectors_config[k].size for k in embedding_keys}
         vectors_by_key: Dict[str, list] = {k: [None] * n for k in embedding_keys}
+        
+        # Track embedding times to detect rate limiting
+        recent_embed_times: list[float] = []
+        rate_limit_threshold = 2.0  # If embed takes > 2 seconds, likely rate limited
+        adaptive_delay = 0.0  # Adaptive delay in seconds
 
         def process_key(key: str, is_code: bool):  # TODo jsut return normaly ar result and put  vectors_by_key as param
+            nonlocal adaptive_delay, recent_embed_times
             logger.debug("process_key start key=%s is_code=%s", key, is_code)
             items: list[tuple[int, str]] = []
             for i, doc in enumerate(documents):
@@ -258,13 +265,81 @@ class QdrantVectorDB:
             else:
                 batch_fn = self.embedding_model.text_embed
 
-            for start in range(0, len(items), self.embedding_batch_size):
-                chunk = items[start: start + self.embedding_batch_size]
+            # Track current batch size - may adjust downward if token limit exceeded
+            current_batch_size = self.embedding_batch_size
+            batch_idx = 0
+            
+            while batch_idx * current_batch_size < len(items):
+                start = batch_idx * current_batch_size
+                end = min(start + current_batch_size, len(items))
+                chunk = items[start: end]
                 indices = [t[0] for t in chunk]
                 texts = [t[1] for t in chunk]
 
-                logger.debug("Embedding batch for key=%s start=%d size=%d", key, start, len(texts))
-                embeddings = batch_fn(texts)
+                # Log what's being embedded with file info
+                total_batches = (len(items) + current_batch_size - 1) // current_batch_size
+                
+                # Extract document info for logging
+                doc_details = []
+                for idx in indices:
+                    doc = documents[idx]
+                    metadata = doc.get("metadata", {})
+                    path = metadata.get('path', '?')
+                    doc_kind = metadata.get("doc_kind", "unknown")
+                    doc_details.append(f"{doc_kind}:{path}")
+                
+                logger.info(
+                    "Embedding batch %d/%d for key=%s (%d items, ~%d tokens): %s",
+                    batch_idx + 1, total_batches, key, len(texts),
+                    sum(len(t.split()) for t in texts) * 1.3,  # Rough token estimate
+                    " | ".join(doc_details[:3]) + ("..." if len(doc_details) > 3 else "")
+                )
+                
+                # Apply adaptive delay before embedding if rate limiting detected
+                if adaptive_delay > 0:
+                    time.sleep(adaptive_delay)
+                
+                # Measure embedding time and handle token limit errors
+                embed_start = time.time()
+                try:
+                    embeddings = batch_fn(texts)
+                except Exception as e:
+                    error_msg = str(e)
+                    # Check if it's a token limit error
+                    if "max allowed tokens" in error_msg.lower() or "120000" in error_msg:
+                        logger.warning(
+                            "Token limit exceeded in batch (size=%d). "
+                            "Reducing batch size and retrying...", current_batch_size
+                        )
+                        # Reduce batch size by half and retry from this batch
+                        current_batch_size = max(1, current_batch_size // 2)
+                        logger.info("New embedding_batch_size: %d", current_batch_size)
+                        continue  # Retry this batch with smaller size
+                    else:
+                        # Re-raise if it's a different error
+                        raise
+                
+                embed_duration = time.time() - embed_start
+                
+                # Track recent embedding times
+                recent_embed_times.append(embed_duration)
+                if len(recent_embed_times) > 10:
+                    recent_embed_times.pop(0)
+                
+                # Detect rate limiting and adjust delay
+                if embed_duration > rate_limit_threshold:
+                    avg_recent = sum(recent_embed_times[-3:]) / min(3, len(recent_embed_times))
+                    if avg_recent > rate_limit_threshold:
+                        # Increase delay if rate limiting detected
+                        adaptive_delay = min(adaptive_delay + 0.5, 2.0)
+                        logger.warning(
+                            "Rate limiting detected (avg embed time: %.2fs). "
+                            "Increasing delay to %.2fs", avg_recent, adaptive_delay
+                        )
+                elif adaptive_delay > 0 and embed_duration < 0.5:
+                    # Gradually decrease delay when fast responses return
+                    adaptive_delay = max(adaptive_delay - 0.1, 0.0)
+                
                 if len(embeddings) != len(texts):
                     logger.error("Embedding batch size mismatch for key=%s expected=%d got=%d", key, len(texts), len(embeddings))
                     raise RuntimeError(
@@ -274,6 +349,8 @@ class QdrantVectorDB:
 
                 for idx, emb in zip(indices, embeddings):
                     vectors_by_key[key][idx] = emb
+                
+                batch_idx += 1
             logger.debug("process_key finished key=%s", key)
 
         process_key("code_to_embedded", is_code=True)

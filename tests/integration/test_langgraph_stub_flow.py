@@ -6,7 +6,8 @@ from src.langgraph.agents.code_inspector import CodeInspectorAgent
 from src.langgraph.agents.verifier import VerifierAgent, VerifierReport
 from src.langgraph.agents.responder import ResponderAgent
 from src.langgraph.orchestrator import Orchestrator
-from src.langgraph.state_models import ConversationState, ConversationBuffer, EvidenceItem
+from src.langgraph.state_models import ConversationState, ConversationBuffer
+from tests.stubs.simple_llm import StubLLM
 
 
 class StubToolNode:
@@ -67,9 +68,10 @@ def test_langgraph_stub_flow_runs_end_to_end():
     )
     code_agent = CodeInspectorAgent(structure_node=structure_node, file_node=file_node)
 
-    task_planner = TaskPlannerAgent()
-    verifier = VerifierAgent(coverage_threshold=0.6)
-    responder = ResponderAgent()
+    llm = StubLLM()
+    task_planner = TaskPlannerAgent(llm=llm)
+    verifier = VerifierAgent(coverage_threshold=0.6, llm=llm)
+    responder = ResponderAgent(llm=llm)
 
     orchestrator = Orchestrator(
         task_planner=task_planner,
@@ -77,6 +79,7 @@ def test_langgraph_stub_flow_runs_end_to_end():
         code_agent=code_agent,
         verifier=verifier,
         max_iterations=3,
+        llm=llm,
     )
 
     state = build_state("Where is the Foo class implemented?")

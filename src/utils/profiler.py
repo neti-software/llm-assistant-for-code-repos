@@ -96,6 +96,29 @@ class ExecutionProfiler:
         self._events.clear()
 
 
+# Global context for tracking progress
+_progress_context = {}
+
+def set_progress_context(repo_name: str, current: int, total: int) -> None:
+    """Set the current progress context for logging."""
+    _progress_context["repo_name"] = repo_name
+    _progress_context["current"] = current
+    _progress_context["total"] = total
+
+def clear_progress_context() -> None:
+    """Clear the progress context."""
+    _progress_context.clear()
+
+def _get_progress_suffix() -> str:
+    """Get a progress suffix for logging if context is set."""
+    if _progress_context:
+        repo = _progress_context.get("repo_name", "")
+        current = _progress_context.get("current", 0)
+        total = _progress_context.get("total", 0)
+        if current > 0 and total > 0:
+            return f" [{current}/{total} {repo}]"
+    return ""
+
 # ---------------- Other decorators ----------------
 def time_it(func: Callable) -> Callable:
     """Measure execution time of sync/async functions and log it."""
@@ -105,7 +128,8 @@ def time_it(func: Callable) -> Callable:
         start = time.perf_counter()
         result = await func(*args, **kwargs)
         elapsed = time.perf_counter() - start
-        logger.info(f"Executed {func.__name__}: {elapsed:.5f} sec")
+        progress_suffix = _get_progress_suffix()
+        logger.info(f"Executed {func.__name__}: {elapsed:.5f} sec{progress_suffix}")
         return result
 
     @wraps(func)
@@ -113,7 +137,8 @@ def time_it(func: Callable) -> Callable:
         start = time.perf_counter()
         result = func(*args, **kwargs)
         elapsed = time.perf_counter() - start
-        logger.info(f"Executed {func.__name__}: {elapsed:.5f} sec")
+        progress_suffix = _get_progress_suffix()
+        logger.info(f"Executed {func.__name__}: {elapsed:.5f} sec{progress_suffix}")
         return result
 
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper

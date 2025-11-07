@@ -8,44 +8,30 @@ from typing import List, Tuple, Optional, Dict, Any
 
 from ..state_models import ConversationState, Task
 from src.llm_module.llm_builder import build_llm
+from src.utils.logger import logger
 
 
 class TaskPlannerAgent:
     """Generate tasks for downstream agents based on the latest conversation using LLM analysis."""
 
-    def __init__(self, llm_config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        llm_config: Optional[Dict[str, Any]] = None,
+        llm: Optional[Any] = None,
+    ) -> None:
         self.llm_config = llm_config
-        self.llm = None
-        self.simple_client = None
-        if llm_config:
-            try:
-                # Try to build LLM normally first
-                self.llm = build_llm(llm_config)
-                print(f"[DEBUG] TaskPlannerAgent: Successfully initialized with regular LLM")
-            except Exception as e:
-                print(f"[DEBUG] TaskPlannerAgent: Regular LLM failed: {e}")
-                # If normal LLM fails, try to create a simple client for task planning
-                try:
-                    api_key = self._load_api_key(llm_config.get("path_to_api_key") or "")
-                    base_url = llm_config.get("base_url", "https://api.openai.com/v1")
-                    model = llm_config.get("model", "openai/gpt-4o-mini")
+        self.llm = llm
+        if self.llm is None and llm_config:
+            self.llm = build_llm(llm_config)
+            logger.info("TaskPlannerAgent: Successfully initialized with regular LLM")
 
-                    print(f"[DEBUG] TaskPlannerAgent: Trying simple client with API key length: {len(api_key)}")
-                    from openai import OpenAI
-                    self.simple_client = OpenAI(
-                        api_key=api_key,
-                        base_url=base_url
-                    )
-                    self.model = model
-                    print(f"[DEBUG] TaskPlannerAgent: Successfully initialized with simple client")
-                except Exception as e2:
-                    print(f"[DEBUG] TaskPlannerAgent: Simple client also failed: {e2}")
-                    # Fallback to rule-based if everything fails
-                    self.llm = None
-                    self.simple_client = None
-
-    def plan(self, state: ConversationState) -> Tuple[ConversationState, List[Task]]:
-        """Return the updated state and the list of new tasks."""
+    def plan(self, state: ConversationState, identified_gaps: Optional[List[str]] = None) -> Tuple[ConversationState, List[Task]]:
+        """Return the updated state and the list of new tasks.
+        
+        Args:
+            state: Current conversation state
+            identified_gaps: Optional list of information gaps identified by the Verifier
+        """
 
         start_time = time.perf_counter()
         latest_question = self._extract_latest_question(state)
@@ -59,18 +45,20 @@ class TaskPlannerAgent:
             if task.metadata.get("input_question") == latest_question
         ]
 
-        if existing_tasks_for_question:
+        # If we have existing tasks but no gaps to address, skip planning
+        if existing_tasks_for_question and not identified_gaps:
             return state, []
 
-        # Use LLM to intelligently plan tasks
-        print(f"[DEBUG] TaskPlannerAgent: llm={self.llm is not None}, simple_client={self.simple_client is not None}")
-        if self.llm or self.simple_client:
-            print(f"[DEBUG] TaskPlannerAgent: Using LLM for planning")
-            tasks_to_add = self._plan_with_llm(latest_question, state)
+        if not self.llm:
+            raise RuntimeError("TaskPlannerAgent requires an LLM configuration. None was provided.")
+
+        # Determine planning mode
+        if identified_gaps:
+            logger.debug(f"TaskPlannerAgent: Using LLM for gap-based planning ({len(identified_gaps)} gaps)")
+            tasks_to_add = self._plan_for_gaps(latest_question, identified_gaps, state)
         else:
-            print(f"[DEBUG] TaskPlannerAgent: No LLM available, using rule-based planning fallback")
-            # Fallback to rule-based planning when no LLM is available (for testing)
-            tasks_to_add = self._plan_with_rules(latest_question, state)
+            logger.debug("TaskPlannerAgent: Using LLM for initial planning")
+            tasks_to_add = self._plan_with_llm(latest_question, state)
 
         if not tasks_to_add:
             return state, []
@@ -81,19 +69,11 @@ class TaskPlannerAgent:
         # Add planning metadata to the first task for debugging
         if tasks_to_add:
             tasks_to_add[0].metadata["planning_time"] = planning_time
-            tasks_to_add[0].metadata["planning_method"] = "llm" if self.llm else ("simple_client" if self.simple_client else "rules")
+            tasks_to_add[0].metadata["planning_method"] = "gap_filling" if identified_gaps else "initial"
+            if identified_gaps:
+                tasks_to_add[0].metadata["addressing_gaps"] = identified_gaps
 
         return state, tasks_to_add
-
-    def _load_api_key(self, key_path: str) -> str:
-        """Load API key from YAML file."""
-        try:
-            import yaml
-            with open(key_path, 'r') as f:
-                data = yaml.safe_load(f)
-                return data.get("key", "")
-        except Exception:
-            return ""
 
     def _plan_with_llm(self, question: str, state: ConversationState) -> List[Task]:
         """Use LLM to intelligently plan tasks based on the question."""
@@ -170,8 +150,8 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
                 else:
                     response_text = str(response) if response is not None else ""
                 
-                print(f"[DEBUG] LLM response length: {len(response_text)}")
-                print(f"[DEBUG] LLM response preview: {response_text[:300]}...")
+                logger.debug(f"LLM response length: {len(response_text)}")
+                logger.debug(f"LLM response preview: {response_text[:300]}...")
             elif self.simple_client:
                 try:
                     response_obj = self.simple_client.chat.completions.create(
@@ -184,49 +164,151 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
                         temperature=0.3
                     )
                     response_text = response_obj.choices[0].message.content or ""
-                    print(f"[DEBUG] Simple client response length: {len(response_text)}")
-                    print(f"[DEBUG] Simple client response preview: {response_text[:300]}...")
+                    logger.debug(f"Simple client response length: {len(response_text)}")
+                    logger.debug(f"Simple client response preview: {response_text[:300]}...")
                 except Exception as e:
-                    print(f"[DEBUG] Simple client failed: {e}")
+                    logger.error(f"Simple client LLM call failed: {e}")
                     return []
             else:
                 return []
 
-            # Parse LLM response
-            try:
-                # Try to extract JSON from response
-                response_clean = response_text.strip()
-                print(f"[DEBUG] Response clean length: {len(response_clean)}")
+            # Parse LLM response using simplified extraction
+            tasks_data = self._extract_json_from_response(response_text)
+            
+            if not tasks_data:
+                logger.warning("No valid JSON tasks extracted from LLM response")
+                return []
 
-                if "```json" in response_clean:
-                    response_clean = response_clean.split("```json")[1].split("```")[0]
-                    print("[DEBUG] Extracted JSON from ```json markers")
-                elif "```" in response_clean:
-                    response_clean = response_clean.split("```")[1].split("```")[0]
-                    print("[DEBUG] Extracted JSON from ``` markers")
-
-                print(f"[DEBUG] Final clean response: {response_clean[:200]}...")
-                tasks_data = json.loads(response_clean)
-                if not isinstance(tasks_data, list):
-                    tasks_data = []
-
-                print(f"[DEBUG] Successfully parsed {len(tasks_data)} tasks")
-
-            except json.JSONDecodeError as e:
-                print(f"[DEBUG] JSON parsing failed: {e}")
-                print(f"[DEBUG] Failed response: {response_clean[:200]}...")
-                # Fallback: parse simple text response
-                tasks_data = self._parse_text_response(response_text)
-                print(f"[DEBUG] Fallback text parsing returned: {len(tasks_data)} tasks")
-
+            logger.debug(f"Successfully parsed {len(tasks_data)} tasks")
             return self._create_tasks_from_llm_plan(tasks_data, question)
 
         except Exception as e:
-            print(f"[DEBUG] TaskPlannerAgent: LLM planning failed with exception: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback to rule-based planning so execution can continue without LLM
-            return self._plan_with_rules(question, state)
+            logger.error(f"TaskPlannerAgent: LLM planning failed with exception: {e}", exc_info=True)
+            raise RuntimeError("Task planning failed due to upstream LLM error") from e
+
+    def _plan_for_gaps(self, question: str, gaps: List[str], state: ConversationState) -> List[Task]:
+        """Generate targeted tasks to address specific information gaps identified by the Verifier."""
+        try:
+            # Format existing evidence for context
+            existing_evidence_summary = ""
+            if state.evidence_store:
+                existing_evidence_summary = f"\n## Evidence Already Collected ({len(state.evidence_store)} items):\n"
+                for i, item in enumerate(state.evidence_store[:10], 1):  # Show first 10
+                    existing_evidence_summary += f"{i}. {item.source_path or 'Unknown source'} (confidence: {item.confidence:.2f})\n"
+                if len(state.evidence_store) > 10:
+                    existing_evidence_summary += f"... and {len(state.evidence_store) - 10} more items\n"
+
+            # Format identified gaps
+            gaps_text = "\n".join(f"- {gap}" for gap in gaps)
+
+            prompt = f"""You are a Gap-Filling Task Planning Agent. The Verifier has identified specific information gaps in our current evidence. Your role is to create targeted research tasks that will fill these gaps.
+
+## Original Question:
+{question}
+
+{existing_evidence_summary}
+
+## Identified Information Gaps:
+{gaps_text}
+
+## Your Task:
+Create specific, targeted research tasks that will gather information to address ONLY the identified gaps above. Do not recreate tasks that would collect information we already have.
+
+## Available Agents:
+1. **repo_research** - Search repository, documentation, find files/patterns
+2. **code_context** - Analyze specific code implementations and details
+3. **documentation_search** - Find setup guides, tutorials, conceptual docs
+4. **configuration_analysis** - Examine config files, deployment settings
+
+## Requirements:
+- Create 1-3 highly targeted tasks
+- Each task should address one or more specific gaps
+- Be specific about what information to look for
+- Prioritize tasks that will have the most impact on coverage
+- Avoid duplicating information we already have
+
+## Response Format (JSON):
+{{
+    "tasks": [
+        {{
+            "type": "repo_research | code_context | documentation_search | configuration_analysis",
+            "description": "Specific, actionable task description targeting the gap",
+            "priority": 1-10,
+            "targets_gaps": ["gap1", "gap2"]
+        }}
+    ]
+}}
+
+Generate gap-filling tasks now:"""
+
+            # Use structured JSON response
+            json_schema = {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "description": {"type": "string"},
+                                "priority": {"type": "integer"},
+                                "targets_gaps": {"type": "array", "items": {"type": "string"}}
+                            },
+                            "required": ["type", "description", "priority", "targets_gaps"],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": ["tasks"],
+                "additionalProperties": False
+            }
+
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "gap_filling_plan",
+                    "schema": json_schema,
+                    "strict": True
+                }
+            }
+
+            want_tool, raw_response = self.llm.generate(prompt, response_format=response_format)
+
+            if want_tool:
+                raise RuntimeError("TaskPlannerAgent received unexpected tool request during gap planning")
+
+            # Extract response content
+            if isinstance(raw_response, dict):
+                if "content" in raw_response:
+                    response_content = raw_response["content"]
+                elif "response" in raw_response:
+                    response_content = raw_response["response"]
+                else:
+                    message = raw_response.get("message", {})
+                    if isinstance(message, dict) and "content" in message:
+                        response_content = message["content"]
+                    else:
+                        response_content = str(raw_response)
+            else:
+                response_content = str(raw_response)
+
+            # Parse JSON response
+            import json
+            plan_data = json.loads(response_content)
+            tasks_data = plan_data.get("tasks", [])
+
+            if not tasks_data:
+                logger.debug("TaskPlannerAgent: No gap-filling tasks generated")
+                return []
+
+            logger.debug(f"TaskPlannerAgent: Generated {len(tasks_data)} gap-filling tasks")
+            return self._create_tasks_from_llm_plan(tasks_data, question)
+
+        except Exception as e:
+            logger.error(f"TaskPlannerAgent: Gap-based planning failed: {e}", exc_info=True)
+            # Fallback: return empty list to avoid breaking the flow
+            return []
 
     def _parse_text_response(self, response: str) -> List[Dict[str, Any]]:
         """Parse a simple text response into task structures."""
@@ -265,7 +347,7 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
 
     def _create_tasks_from_llm_plan(self, tasks_data: List[Dict[str, Any]], question: str) -> List[Task]:
         """Convert LLM task plan into Task objects."""
-        print(f"[DEBUG] _create_tasks_from_llm_plan called with {len(tasks_data)} tasks")
+        logger.debug(f"_create_tasks_from_llm_plan called with {len(tasks_data)} tasks")
         tasks = []
         next_id = 1  # Start with task ID 1
 
@@ -277,7 +359,7 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
         }
 
         for i, task_data in enumerate(tasks_data[:3]):  # Limit to 3 tasks max
-            print(f"[DEBUG] Creating task {i+1}: {task_data}")
+            logger.debug(f"Creating task {i+1}: {task_data}")
             task_type = task_data.get("type", "repo_research")
             description = task_data.get("description", f"Research {task_type}")
 
@@ -293,47 +375,61 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
                 },
             ))
 
-        print(f"[DEBUG] Created {len(tasks)} tasks from LLM plan")
+        logger.debug(f"Created {len(tasks)} tasks from LLM plan")
         return tasks
 
-    def _plan_with_rules(self, question: str, state: ConversationState) -> List[Task]:
-        """Fallback rule-based task planning (original implementation)."""
-        existing_types = {task.type for task in state.tasks}
-        tasks_to_add: List[Task] = []
-        next_id = self._next_task_index(state)
-
-        if "repo_research" not in existing_types:
-            tasks_to_add.append(
-                Task(
-                    id=f"task-{next_id}",
-                    type="repo_research",
-                    description="Gather repository-level context and relevant snippets",
-                    owner="repo_intelligence_agent",
-                    metadata={
-                        "input_question": question,
-                        "strategy": "broad_repo_search",
-                    },
-                )
-            )
-            next_id += 1
-
-        # Use the updated keyword detection
-        if self._should_request_code_context(question) and "code_context" not in existing_types:
-            tasks_to_add.append(
-                Task(
-                    id=f"task-{next_id}",
-                    type="code_context",
-                    description="Collect precise file excerpts supporting the query",
-                    owner="code_inspector_agent",
-                    metadata={
-                        "input_question": question,
-                        "strategy": "targeted_file_lookup",
-                        "target_paths": [],
-                    },
-                )
-            )
-
-        return tasks_to_add
+    def _extract_json_from_response(self, response_text: str) -> List[Dict[str, Any]]:
+        """Extract and parse JSON from LLM response text.
+        
+        Attempts to extract valid JSON from various response formats:
+        1. Direct JSON array
+        2. JSON wrapped in ```json markers
+        3. JSON wrapped in ``` markers
+        
+        Args:
+            response_text: Raw response text from LLM
+            
+        Returns:
+            List of task dictionaries parsed from JSON, or empty list if parsing fails
+        """
+        import json
+        import re
+        
+        try:
+            response_clean = response_text.strip()
+            logger.debug(f"Response length: {len(response_clean)}")
+            
+            # Try to extract JSON from code blocks
+            if "```json" in response_clean:
+                response_clean = response_clean.split("```json")[1].split("```")[0]
+                logger.debug("Extracted JSON from ```json markers")
+            elif "```" in response_clean:
+                response_clean = response_clean.split("```")[1].split("```")[0]
+                logger.debug("Extracted JSON from ``` markers")
+            
+            logger.debug(f"Clean response preview: {response_clean[:200]}...")
+            
+            # Parse JSON
+            tasks_data = json.loads(response_clean)
+            
+            # Ensure we have a list
+            if isinstance(tasks_data, dict) and "tasks" in tasks_data:
+                tasks_data = tasks_data["tasks"]
+            
+            if not isinstance(tasks_data, list):
+                logger.warning(f"Expected list but got {type(tasks_data).__name__}")
+                return []
+            
+            logger.debug(f"Successfully parsed {len(tasks_data)} tasks from JSON")
+            return tasks_data
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            logger.debug(f"Failed to parse: {response_clean[:200] if 'response_clean' in locals() else response_text[:200]}")
+            return []
+        except Exception as e:
+            logger.error(f"Error extracting JSON: {e}")
+            return []
 
     def _extract_latest_question(self, state: ConversationState) -> str | None:
         if state.conversation.history:
@@ -345,24 +441,3 @@ Respond with a JSON array of 2-4 strategic tasks that will provide comprehensive
             last_key = sorted(state.conversation.user_questions.keys())[-1]
             return state.conversation.user_questions[last_key]
         return None
-
-    def _should_request_code_context(self, question: str) -> bool:
-        """Check if question contains keywords that suggest need for code analysis."""
-        lowered = question.lower()
-        keywords = {
-            "class", "function", "method", "def", "impl", "implementation",
-            "file", "line", "snippet", "code", "how to", "example", "usage"
-        }
-        return any(keyword in lowered for keyword in keywords)
-
-    def _next_task_index(self, state: ConversationState) -> int:
-        """Generate next task index based on existing tasks."""
-        existing_ids = [task.id for task in state.tasks if task.id.startswith("task-")]
-        max_existing = 0
-        for task_id in existing_ids:
-            try:
-                _, idx = task_id.split("-", 1)
-                max_existing = max(max_existing, int(idx))
-            except (ValueError, TypeError):
-                continue
-        return max_existing + 1 if max_existing >= 0 else 1

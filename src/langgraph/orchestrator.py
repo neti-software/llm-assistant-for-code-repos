@@ -58,8 +58,15 @@ class Orchestrator:
         while iteration < self.max_iterations:
             state.control_flags.iteration = iteration
 
+            # Get gaps from previous Verifier report (if any) to guide planning
+            identified_gaps = None
+            if iteration > 0 and hasattr(state.control_flags, 'last_verifier_report'):
+                verifier_report = state.control_flags.last_verifier_report
+                if verifier_report and verifier_report.get("missing_items"):
+                    identified_gaps = verifier_report["missing_items"]
+
             turn_start = time.perf_counter()
-            new_state, new_tasks = self.task_planner.plan(state)
+            new_state, new_tasks = self.task_planner.plan(state, identified_gaps=identified_gaps)
             state = new_state
             planning_duration = time.perf_counter() - turn_start
 
@@ -75,10 +82,16 @@ class Orchestrator:
                 "verifier": None,
             }
 
-            self._log(
-                live_log,
-                f"Task Planner generated {len(new_tasks)} task(s) in {planning_duration:.2f}s",
-            )
+            if identified_gaps:
+                self._log(
+                    live_log,
+                    f"Task Planner generated {len(new_tasks)} task(s) in {planning_duration:.2f}s (addressing {len(identified_gaps)} gap(s))",
+                )
+            else:
+                self._log(
+                    live_log,
+                    f"Task Planner generated {len(new_tasks)} task(s) in {planning_duration:.2f}s",
+                )
 
             repo_new_items = []
             code_new_items = []
@@ -143,7 +156,36 @@ class Orchestrator:
                 f"Verifier coverage={getattr(report, 'coverage_score', 0):.2f} evaluated in {elapsed:.2f}s",
             )
 
-            # Generate final answer using responder
+            iteration_entry["total_evidence_items"] = len(state.evidence_store)
+            
+            # Check if we need another iteration
+            missing_items = getattr(report, "missing_items", None)
+            coverage_score = getattr(report, "coverage_score", 0.0)
+            
+            # Derive needs_more_work flag: either we have missing items or coverage is below threshold
+            # Guard against missing_items being None by treating it as empty list
+            has_missing_items = bool(missing_items) if missing_items is not None else False
+            needs_more_work = has_missing_items or coverage_score < self.verifier.coverage_threshold
+            
+            if needs_more_work and iteration < self.max_iterations - 1:
+                # More work needed and we have iterations left - skip final answer generation
+                reason_parts = []
+                if has_missing_items and missing_items:
+                    reason_parts.append(f"{len(missing_items)} gap(s)")
+                if coverage_score < self.verifier.coverage_threshold:
+                    reason_parts.append(f"coverage {coverage_score:.2f} < {self.verifier.coverage_threshold:.2f}")
+                
+                reason = " and ".join(reason_parts)
+                self._log(
+                    live_log,
+                    f"Verifier identified {reason}. Proceeding to next iteration.",
+                )
+                iteration_entry["responder"] = None  # No response generated this iteration
+                timeline.append(iteration_entry)
+                iteration += 1
+                continue
+
+            # Generate final answer using responder (only when coverage is sufficient or max iterations reached)
             self._log(live_log, "Responder agent generating final answer")
             start = time.perf_counter()
             final_response = self.responder.respond(state)
@@ -158,12 +200,7 @@ class Orchestrator:
             )
             final_report = final_response
 
-            iteration_entry["total_evidence_items"] = len(state.evidence_store)
             timeline.append(iteration_entry)
-
-            if getattr(report, "missing_items", []):
-                iteration += 1
-                continue
             break
 
         state.control_flags.iteration = iteration
